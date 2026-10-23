@@ -10,6 +10,8 @@ Windows-first network inventory and bounded TCP-port auditing dashboard using Py
 - TCP ports come from a fixed common-port allowlist; at most 25 per job by default.
 - Conservative Nmap connect scans only: no scripts, OS detection, or version detection.
 - Local-only bind by default (127.0.0.1); do not expose this app directly to the internet.
+- Per-process login throttling and same-origin checks for browser POST requests.
+- Security response headers and HTML escaping for untrusted login-page content.
 - Users, scan jobs, findings, and audit events are stored in SQLite.
 - No scan runs automatically at startup.
 
@@ -71,8 +73,8 @@ pip install -r requirements-dev.txt
 python -m pytest
 ```
 
-Tests validate input limits and scope; they do not scan a live network.
+Tests run on Ubuntu and Windows via GitHub Actions. They validate authentication, request-origin checks, response headers, escaping, input limits and scan scope; they do not scan a live network or replace an end-to-end installation test.
 
 ## Limitations
 
-This is an MVP, not a certified security product. It may not identify every device on switched networks or discover MAC addresses across routers. Findings are indicators for review, not proof of compromise. Before institutional deployment, add formal CSRF protection, secret rotation, backups/restore, managed TLS, retention controls, and an independent security review.
+This is an MVP, not a certified security product. It may not identify every device on switched networks or discover MAC addresses across routers. Findings are indicators for review, not proof of compromise. Login throttling is in-memory per process, so it is not a substitute for a shared limiter in a multi-worker deployment. Origin checks are a useful browser defense but not a full CSRF-token implementation. Before institutional deployment, add a formal CSRF token, secret rotation, backups/restore, managed TLS, retention controls, and an independent security review.
