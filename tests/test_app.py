@@ -48,7 +48,7 @@ def test_cross_origin_post_is_rejected():
 def test_login_rate_limit_blocks_repeated_failures():
     from app.main import _login_failures
     _login_failures.clear()
-    with TestClient(app) as client:
+    with TestClient(app, follow_redirects=False) as client:
         for _ in range(5):
             response = client.post("/api/login", data={"username": "missing_rate_limit_user", "password": "wrong-password"})
             assert response.status_code == 303
