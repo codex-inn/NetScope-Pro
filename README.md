@@ -36,17 +36,23 @@ The site is a static HTML/CSS/JavaScript app in `index.html`. No build step or p
 
 Only assess URLs and systems you are authorized to inspect.
 
-## Main Network Scan (optional hosted API)
+## Main Network Scan (Cloudflare Workers; no Render required)
 
-The website is static, so GitHub Pages itself cannot open arbitrary TCP connections or discover devices on your Wi-Fi. The **Main Network Scan** screen calls an optional hosted API; without that API deployed and configured, it will report that scanning is unavailable rather than inventing results.
+The website is static, so GitHub Pages itself cannot open arbitrary TCP connections or discover devices on your Wi-Fi. The **Main Network Scan** screen calls an optional Cloudflare Worker API; without that API deployed and configured, it reports that scanning is unavailable rather than inventing results. This setup does not use Render and does not require an EXE.
 
-### Deploy the optional API
+### Deploy the optional Cloudflare Worker API
 
-1. In your hosting provider, create a Python web service from this repository using the included `render.yaml` blueprint (or configure a service with root directory `api`, build command `pip install -r requirements.txt`, and start command `uvicorn main:app --host 0.0.0.0 --port $PORT`).
-2. Set `ALLOWED_SCAN_TARGETS` to a comma-separated list of public hostnames or individual public IP addresses that you own or are explicitly authorized to assess. Example: `example.org`. Do not add private LAN addresses. Leave it unset until you are ready to configure an authorized target.
-3. Set `CORS_ORIGINS` to `https://codex-inn.github.io` (and any additional exact trusted frontend origins you control).
-4. Deploy the API, then open the website and paste the API base URL into **Main Network Scan**. Click **Check API connection**.
-5. Enter an exact allowlisted hostname/IP, select supported ports, check the authorization confirmation, and start the scan.
+1. Create/sign in to a Cloudflare account and open **Workers & Pages**.
+2. Create a Worker named `netscope-pro-scan-api`.
+3. In the Worker editor, copy the code from `cloudflare-worker/src/index.js` into the Worker and deploy it. Alternatively, use Wrangler from a development environment with the project files:
+   ```bash
+   cd cloudflare-worker
+   npx wrangler deploy
+   ```
+4. In the Worker settings, add the variable `ALLOWED_SCAN_TARGETS` with a comma-separated list of exact public hostnames or individual public IPv4 addresses that you own or are explicitly authorized to assess. Example: `your-domain.example`. Do not add private LAN addresses. Leave it unset until ready to configure an authorized target.
+5. Add `CORS_ORIGINS` as a variable with value `https://codex-inn.github.io`. If you use a custom GitHub Pages domain, add that exact origin too.
+6. Open the deployed Worker URL, then open NetScope Pro → **Main Network Scan**. Enter the Worker base URL (for example, `https://netscope-pro-scan-api.<your-subdomain>.workers.dev`), click **Check API connection**, then enter the allowlisted target, select ports, and confirm authorization.
+7. If Cloudflare disables or limits outbound TCP sockets for your account or plan, the real TCP scan feature will not work on that account. The website will show the API error rather than fabricate results.
 
 ### Scope and safeguards
 
