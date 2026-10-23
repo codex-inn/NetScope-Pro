@@ -126,6 +126,24 @@ init_db()
 
 
 @app.middleware("http")
+async def enforce_same_origin_for_unsafe_requests(request: Request, call_next):
+    # Browsers send Origin on cross-origin POST requests. Reject mismatches while
+    # allowing local command-line clients that do not send Origin.
+    if request.method in {"POST", "PUT", "PATCH", "DELETE"}:
+        origin = request.headers.get("origin")
+        host = request.headers.get("host", "")
+        if origin:
+            from urllib.parse import urlsplit
+            parsed = urlsplit(origin)
+            expected_host = host.lower()
+            origin_host = (parsed.netloc or "").lower()
+            if parsed.scheme not in {"http", "https"} or not origin_host or origin_host != expected_host:
+                return JSONResponse({"detail": "Cross-origin request rejected."}, status_code=403)
+    response = await call_next(request)
+    return response
+
+
+@app.middleware("http")
 async def add_security_headers(request: Request, call_next):
     response = await call_next(request)
     response.headers["X-Content-Type-Options"] = "nosniff"
@@ -379,9 +397,20 @@ async def run_nmap(scan_id: int, target: str, ports: list[int], actor: str):
 async def create_scan(request: Request, user: dict = Depends(current_user)):
     if user["role"] not in ("admin", "operator"):
         raise HTTPException(403, "Insufficient role.")
-    payload = await request.json()
-    target = validate_target(str(payload.get("target", "")), MAX_HOSTS)
-    ports = validate_ports(payload.get("ports", PORTS_DEFAULT), MAX_PORTS)
+    try:
+        payload = await request.json()
+    except (ValueError, TypeError):
+        raise HTTPException(400, "Request body must be valid JSON.")
+    if not isinstance(payload, dict):
+        raise HTTPException(400, "Request body must be a JSON object.")
+    try:
+        target = validate_target(str(payload.get("target", "")), MAX_HOSTS)
+        raw_ports = payload.get("ports", PORTS_DEFAULT)
+        if not isinstance(raw_ports, list):
+            raise ValueError("Ports must be a JSON list of allowed TCP port numbers.")
+        ports = validate_ports(raw_ports, MAX_PORTS)
+    except (ValueError, TypeError) as exc:
+        raise HTTPException(400, str(exc))
     with db() as con:
         running = con.execute("SELECT COUNT(*) FROM scans WHERE status='running'").fetchone()[0]
         if running >= MAX_CONCURRENT:
@@ -445,8 +474,13 @@ async def create_user(request: Request, user: dict = Depends(admin_user)):
 async def set_schedule_enabled(schedule_id: int, request: Request, user: dict = Depends(admin_user)):
     if os.getenv("SCHEDULER_ENABLED", "false").lower() != "true":
         raise HTTPException(403, "Scheduler is disabled in .env. Set SCHEDULER_ENABLED=true after reviewing the approved scope.")
-    payload = await request.json()
-    enabled = bool(payload.get("enabled", False))
+    try:
+        payload = await request.json()
+    except (ValueError, TypeError):
+        raise HTTPException(400, "Request body must be valid JSON.")
+    if not isinstance(payload, dict) or not isinstance(payload.get("enabled", False), bool):
+        raise HTTPException(400, "The enabled field must be true or false.")
+    enabled = payload.get("enabled", False)
     with db() as con:
         row = con.execute("SELECT * FROM schedules WHERE id=?", (schedule_id,)).fetchone()
         if not row:
@@ -471,10 +505,21 @@ def list_schedules(user: dict = Depends(admin_user)):
 async def create_schedule(request: Request, user: dict = Depends(admin_user)):
     if os.getenv("SCHEDULER_ENABLED", "false").lower() != "true":
         raise HTTPException(403, "Scheduler is disabled. Enable SCHEDULER_ENABLED=true only after reviewing your approved scope.")
-    payload = await request.json()
-    target = validate_target(str(payload.get("target", "")), MAX_HOSTS)
-    ports = validate_ports(payload.get("ports", PORTS_DEFAULT), MAX_PORTS)
-    interval = int(payload.get("interval_minutes", 1440))
+    try:
+        payload = await request.json()
+    except (ValueError, TypeError):
+        raise HTTPException(400, "Request body must be valid JSON.")
+    if not isinstance(payload, dict):
+        raise HTTPException(400, "Request body must be a JSON object.")
+    try:
+        target = validate_target(str(payload.get("target", "")), MAX_HOSTS)
+        raw_ports = payload.get("ports", PORTS_DEFAULT)
+        if not isinstance(raw_ports, list):
+            raise ValueError("Ports must be a JSON list of allowed TCP port numbers.")
+        ports = validate_ports(raw_ports, MAX_PORTS)
+        interval = int(payload.get("interval_minutes", 1440))
+    except (ValueError, TypeError) as exc:
+        raise HTTPException(400, str(exc))
     if interval < 60 or interval > 10080:
         raise HTTPException(400, "Schedule interval must be 60 to 10080 minutes.")
     with db() as con:
