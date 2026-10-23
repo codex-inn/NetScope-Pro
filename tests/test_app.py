@@ -167,3 +167,25 @@ def test_mega_web_check_endpoint_returns_bounded_check(monkeypatch):
     finally:
         app.dependency_overrides.pop(current_user, None)
 
+def test_mega_scanner_returns_retryable_error_when_worker_slots_are_full(monkeypatch):
+    from app.main import current_user, MegaScannerBusy
+    import app.main as main_module
+
+    def busy_worker(_operation, _target):
+        raise MegaScannerBusy("Mega Scanner is busy; wait for an existing check to finish.")
+
+    monkeypatch.setattr(main_module, "_run_mega_bounded", busy_worker)
+    app.dependency_overrides[current_user] = lambda: {
+        "id": 1, "username": "test-admin", "role": "admin", "active": 1
+    }
+    try:
+        with TestClient(app) as client:
+            dns = client.post("/api/mega/dns", json={"target": "example.com"})
+            website = client.post("/api/mega/web-check", json={"target": "https://example.com"})
+        assert dns.status_code == 503
+        assert website.status_code == 503
+        assert dns.headers["retry-after"] == "3"
+        assert website.headers["retry-after"] == "3"
+    finally:
+        app.dependency_overrides.pop(current_user, None)
+
