@@ -125,7 +125,7 @@ def register_schedule(schedule_id: int, interval_minutes: int) -> None:
     if scheduler.running:
         scheduler.add_job(execute_scheduled_scan, "interval", minutes=interval_minutes,
                           args=[schedule_id], id=job_id, replace_existing=True, max_instances=1,
-                          coalesce=True, next_run_time=None)
+                          coalesce=True)
 
 
 @app.on_event("startup")
@@ -462,7 +462,8 @@ async function ack(id){try{await api('/api/alerts/'+id+'/acknowledge',{method:'P
 async function startScan(){try{const ports=document.getElementById('ports').value.split(',').map(x=>Number(x.trim()));const d=await api('/api/scans',{method:'POST',body:JSON.stringify({target:document.getElementById('target').value,ports})});toast('Scan #'+d.id+' queued. Refresh for status.');await loadAll()}catch(e){toast(e.message)}}
 async function loadUsers(){try{const u=await api('/api/users');usersList.innerHTML='<div style="overflow:auto"><table><tr><th>User</th><th>Role</th><th>Active</th></tr>'+u.map(x=>'<tr><td>'+esc(x.username)+'</td><td>'+esc(x.role)+'</td><td>'+x.active+'</td></tr>').join('')+'</table></div>'}catch(e){usersList.textContent=e.message}}
 async function createUser(){try{const d=await api('/api/users',{method:'POST',body:JSON.stringify({username:newUsername.value,password:newPassword.value,role:newRole.value})});toast('Created '+d.username);newPassword.value='';await loadUsers()}catch(e){toast(e.message)}}
-async function loadSchedules(){try{const s=await api('/api/schedules');scheduleList.innerHTML=s.length?'<table><tr><th>Target</th><th>Interval</th><th>Enabled</th></tr>'+s.map(x=>'<tr><td>'+esc(x.target)+'</td><td>'+x.interval_minutes+' min</td><td>Disabled</td></tr>').join('')+'</table>':'<div class="empty">No saved schedules.</div>'}catch(e){scheduleList.textContent=e.message}}
+async function loadSchedules(){try{const s=await api('/api/schedules');scheduleList.innerHTML=s.length?'<table><tr><th>Target</th><th>Interval</th><th>Status</th><th>Action</th></tr>'+s.map(x=>'<tr><td>'+esc(x.target)+'</td><td>'+x.interval_minutes+' min</td><td>'+(x.enabled?'Enabled':'Disabled')+'</td><td><button class="secondary" onclick="toggleSchedule('+x.id+','+(!x.enabled)+')">'+(x.enabled?'Disable':'Enable')+'</button></td></tr>').join('')+'</table>':'<div class="empty">No saved schedules.</div>'}catch(e){scheduleList.textContent=e.message}}
+async function toggleSchedule(id,enabled){try{const d=await api('/api/schedules/'+id+'/enable',{method:'POST',body:JSON.stringify({enabled})});toast('Schedule '+(d.enabled?'enabled':'disabled'));await loadSchedules()}catch(e){toast(e.message)}}
 async function createSchedule(){try{const ports=schedulePorts.value.split(',').map(x=>Number(x.trim()));const d=await api('/api/schedules',{method:'POST',body:JSON.stringify({target:scheduleTarget.value,ports,interval_minutes:Number(scheduleInterval.value)})});toast(d.message);await loadSchedules()}catch(e){toast(e.message)}}
 loadAll();loadAlerts();setInterval(loadAll,10000);
 </script></body></html>"""
