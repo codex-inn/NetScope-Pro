@@ -1,3 +1,6 @@
+Warning: truncated output (original token count: 11462)
+Total output lines: 619
+
 from __future__ import annotations
 
 import asyncio
@@ -18,7 +21,7 @@ from fastapi.responses import HTMLResponse, RedirectResponse, JSONResponse
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
 from starlette.middleware.sessions import SessionMiddleware
 
-from app.security import hash_password, verify_password, validate_target, validate_ports, ALLOWED_PORTS, html_escape
+from app.security import hash_password, verify_password, validate_target, validate_ports, approved_networks, ALLOWED_PORTS, html_escape
 from app.mega_scanner import TargetError, resolve_public_host, web_check
 
 load_dotenv()
@@ -360,7 +363,7 @@ async def run_nmap(scan_id: int, target: str, ports: list[int], actor: str):
                     ip = addr.attrib.get("addr", "")
                     # Defensive result scope check.
                     ip_obj = ipaddress.ip_address(ip)
-                    if not any(ip_obj in net for net in __import__("app.security", fromlist=["approved_networks"]).approved_networks()):
+                    if not any(ip_obj in net for net in approved_networks()):
                         continue
                     status_el = host.find("status")
                     state = status_el.attrib.get("state", "unknown") if status_el is not None else "unknown"
@@ -402,116 +405,7 @@ async def create_scan(request: Request, user: dict = Depends(current_user)):
         payload = await request.json()
     except (ValueError, TypeError):
         raise HTTPException(400, "Request body must be valid JSON.")
-    if not isinstance(payload, dict):
-        raise HTTPException(400, "Request body must be a JSON object.")
-    try:
-        target = validate_target(str(payload.get("target", "")), MAX_HOSTS)
-        raw_ports = payload.get("ports", PORTS_DEFAULT)
-        if not isinstance(raw_ports, list):
-            raise ValueError("Ports must be a JSON list of allowed TCP port numbers.")
-        ports = validate_ports(raw_ports, MAX_PORTS)
-    except (ValueError, TypeError) as exc:
-        raise HTTPException(400, str(exc))
-    with db() as con:
-        running = con.execute("SELECT COUNT(*) FROM scans WHERE status='running'").fetchone()[0]
-        if running >= MAX_CONCURRENT:
-            raise HTTPException(429, "Scan queue is full. Wait for the active scan to finish.")
-        cur = con.execute("INSERT INTO scans(target,ports,status,started_at,requested_by) VALUES(?,?,?,?,?)",
-                          (target, json.dumps(ports), "running", now(), user["username"]))
-        scan_id = cur.lastrowid
-        con.execute("INSERT INTO audit(actor,action,detail,created_at) VALUES(?,?,?,?)",
-                    (user["username"], "scan_started", json.dumps({"scan_id": scan_id, "target": target, "ports": ports}), now()))
-    asyncio.create_task(run_nmap(scan_id, target, ports, user["username"]))
-    return {"id": scan_id, "status": "running", "target": target, "ports": ports}
-
-
-@app.get("/api/alerts")
-def alerts(user: dict = Depends(current_user)):
-    with db() as con:
-        return [dict(r) for r in con.execute("SELECT * FROM alerts ORDER BY id DESC LIMIT 100")]
-
-
-@app.post("/api/alerts/{alert_id}/acknowledge")
-def acknowledge_alert(alert_id: int, user: dict = Depends(current_user)):
-    with db() as con:
-        cur = con.execute("UPDATE alerts SET acknowledged=1 WHERE id=?", (alert_id,))
-        if cur.rowcount == 0:
-            raise HTTPException(404, "Alert not found.")
-    audit(user["username"], "alert_acknowledged", str(alert_id))
-    return {"ok": True}
-
-
-@app.get("/api/users")
-def list_users(user: dict = Depends(admin_user)):
-    with db() as con:
-        return [dict(r) for r in con.execute("SELECT id,username,role,active,created_at FROM users ORDER BY id")]
-
-
-@app.post("/api/users", status_code=201)
-async def create_user(request: Request, user: dict = Depends(admin_user)):
-    payload = await request.json()
-    username = str(payload.get("username", "")).strip()
-    password = str(payload.get("password", ""))
-    role = str(payload.get("role", "operator"))
-    if len(username) < 3 or len(username) > 40 or not username.replace("_", "").replace("-", "").isalnum():
-        raise HTTPException(400, "Username must be 3-40 letters, digits, underscore or hyphen.")
-    if role not in ("admin", "operator"):
-        raise HTTPException(400, "Role must be admin or operator.")
-    try:
-        password_hash = hash_password(password)
-    except ValueError as exc:
-        raise HTTPException(400, str(exc))
-    try:
-        with db() as con:
-            cur = con.execute("INSERT INTO users(username,password_hash,role,created_at) VALUES(?,?,?,?)",
-                              (username, password_hash, role, now()))
-    except sqlite3.IntegrityError:
-        raise HTTPException(409, "Username already exists.")
-    audit(user["username"], "user_created", json.dumps({"username": username, "role": role}))
-    return {"id": cur.lastrowid, "username": username, "role": role}
-
-
-@app.post("/api/schedules/{schedule_id}/enable")
-async def set_schedule_enabled(schedule_id: int, request: Request, user: dict = Depends(admin_user)):
-    if os.getenv("SCHEDULER_ENABLED", "false").lower() != "true":
-        raise HTTPException(403, "Scheduler is disabled in .env. Set SCHEDULER_ENABLED=true after reviewing the approved scope.")
-    try:
-        payload = await request.json()
-    except (ValueError, TypeError):
-        raise HTTPException(400, "Request body must be valid JSON.")
-    if not isinstance(payload, dict) or not isinstance(payload.get("enabled", False), bool):
-        raise HTTPException(400, "The enabled field must be true or false.")
-    enabled = payload.get("enabled", False)
-    with db() as con:
-        row = con.execute("SELECT * FROM schedules WHERE id=?", (schedule_id,)).fetchone()
-        if not row:
-            raise HTTPException(404, "Schedule not found.")
-        con.execute("UPDATE schedules SET enabled=? WHERE id=?", (1 if enabled else 0, schedule_id))
-    job_id = f"netscope-schedule-{schedule_id}"
-    if enabled:
-        register_schedule(schedule_id, int(row["interval_minutes"]))
-    elif scheduler.running and scheduler.get_job(job_id):
-        scheduler.remove_job(job_id)
-    audit(user["username"], "schedule_enabled" if enabled else "schedule_disabled", str(schedule_id))
-    return {"id": schedule_id, "enabled": enabled}
-
-
-@app.get("/api/schedules")
-def list_schedules(user: dict = Depends(admin_user)):
-    with db() as con:
-        return [dict(r) for r in con.execute("SELECT * FROM schedules ORDER BY id DESC")]
-
-
-@app.post("/api/schedules", status_code=201)
-async def create_schedule(request: Request, user: dict = Depends(admin_user)):
-    if os.getenv("SCHEDULER_ENABLED", "false").lower() != "true":
-        raise HTTPException(403, "Scheduler is disabled. Enable SCHEDULER_ENABLED=true only after reviewing your approved scope.")
-    try:
-        payload = await request.json()
-    except (ValueError, TypeError):
-        raise HTTPException(400, "Request body must be valid JSON.")
-    if not isinstance(payload, dict):
-        raise HTTPException(400, "Request body must be a JSON object.")
+    if not isinstance(…1462 tokens truncated…ise HTTPException(400, "Request body must be a JSON object.")
     try:
         target = validate_target(str(payload.get("target", "")), MAX_HOSTS)
         raw_ports = payload.get("ports", PORTS_DEFAULT)
@@ -611,3 +505,4 @@ async function toggleSchedule(id,enabled){try{const d=await api('/api/schedules/
 async function createSchedule(){try{const ports=schedulePorts.value.split(',').map(x=>Number(x.trim()));const d=await api('/api/schedules',{method:'POST',body:JSON.stringify({target:scheduleTarget.value,ports,interval_minutes:Number(scheduleInterval.value)})});toast(d.message);await loadSchedules()}catch(e){toast(e.message)}}
 loadAll();loadAlerts();setInterval(loadAll,10000);
 </script></body></html>"""
+

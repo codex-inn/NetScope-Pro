@@ -37,6 +37,22 @@ def test_protected_dashboard_requires_login():
     assert response.status_code == 401
 
 
+def test_create_user_rejects_invalid_json_and_non_object_payloads():
+    from app.main import current_user
+
+    app.dependency_overrides[current_user] = lambda: {"id": 1, "username": "test-admin", "role": "admin", "active": 1}
+    try:
+        with TestClient(app) as client:
+            invalid_json = client.post("/api/users", content="{", headers={"Content-Type": "application/json"})
+            non_object = client.post("/api/users", json=[])
+        assert invalid_json.status_code == 400
+        assert invalid_json.json()["detail"] == "Request body must be valid JSON."
+        assert non_object.status_code == 400
+        assert non_object.json()["detail"] == "Request body must be a JSON object."
+    finally:
+        app.dependency_overrides.pop(current_user, None)
+
+
 
 def test_cross_origin_post_is_rejected():
     with TestClient(app) as client:
@@ -77,3 +93,4 @@ def test_scan_rejects_unapproved_target_with_client_error():
         response = client.post("/api/scans", json={"target": "192.0.2.1", "ports": [80]})
     assert response.status_code == 400
     assert "Scanning is disabled" in response.json()["detail"]
+
