@@ -1,5 +1,5 @@
 import pytest
-from app.security import hash_password, verify_password, validate_target, validate_ports
+from app.security import hash_password, verify_password, validate_target, validate_ports, html_escape
 
 def test_password_hash_roundtrip():
     stored = hash_password("a-long-test-password-123")
@@ -29,3 +29,8 @@ def test_ports_allowlist_and_count():
         validate_ports([1])
     with pytest.raises(ValueError, match="At most 2"):
         validate_ports([22, 80, 443], max_ports=2)
+
+
+def test_html_escape_prevents_markup_injection():
+    assert html_escape('<script>alert("x")</script>') == '&lt;script&gt;alert(&quot;x&quot;)&lt;/script&gt;'
+    assert html_escape("' onmouseover='alert(1)") == '&#x27; onmouseover=&#x27;alert(1)'
