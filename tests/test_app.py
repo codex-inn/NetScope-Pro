@@ -37,6 +37,22 @@ def test_protected_dashboard_requires_login():
     assert response.status_code == 401
 
 
+def test_create_user_rejects_invalid_json_and_non_object_payloads():
+    from app.main import current_user
+
+    app.dependency_overrides[current_user] = lambda: {"id": 1, "username": "test-admin", "role": "admin", "active": 1}
+    try:
+        with TestClient(app) as client:
+            invalid_json = client.post("/api/users", content="{", headers={"Content-Type": "application/json"})
+            non_object = client.post("/api/users", json=[])
+        assert invalid_json.status_code == 400
+        assert invalid_json.json()["detail"] == "Request body must be valid JSON."
+        assert non_object.status_code == 400
+        assert non_object.json()["detail"] == "Request body must be a JSON object."
+    finally:
+        app.dependency_overrides.pop(current_user, None)
+
+
 
 def test_cross_origin_post_is_rejected():
     with TestClient(app) as client:
@@ -77,3 +93,99 @@ def test_scan_rejects_unapproved_target_with_client_error():
         response = client.post("/api/scans", json={"target": "192.0.2.1", "ports": [80]})
     assert response.status_code == 400
     assert "Scanning is disabled" in response.json()["detail"]
+
+def test_mega_scanner_endpoints_require_login():
+    with TestClient(app) as client:
+        dns = client.post("/api/mega/dns", json={"target": "example.com"})
+        web_check = client.post("/api/mega/web-check", json={"target": "https://example.com"})
+        report = client.get("/api/mega/export/scans")
+    assert dns.status_code == 401
+    assert web_check.status_code == 401
+    assert report.status_code == 401
+
+
+def test_mega_scanner_rejects_non_object_json(monkeypatch):
+    from app.main import current_user
+
+    app.dependency_overrides[current_user] = lambda: {
+        "id": 1, "username": "test-admin", "role": "admin", "active": 1
+    }
+    try:
+        with TestClient(app) as client:
+            dns = client.post("/api/mega/dns", json=[])
+            web_check = client.post("/api/mega/web-check", json=[])
+        assert dns.status_code == 400
+        assert web_check.status_code == 400
+        assert dns.json()["detail"] == "Request body must be a JSON object."
+        assert web_check.json()["detail"] == "Request body must be a JSON object."
+    finally:
+        app.dependency_overrides.pop(current_user, None)
+
+def test_mega_dns_endpoint_returns_lookup_result(monkeypatch):
+    from app.main import current_user
+    import app.main as main_module
+
+    expected = {
+        "host": "example.com",
+        "canonical_name": "example.com",
+        "addresses": [{"address": "8.8.8.8", "family": "IPv4"}],
+        "checked_at": "2026-10-23T00:00:00+00:00",
+    }
+    monkeypatch.setattr(main_module, "resolve_public_host", lambda target: expected)
+    app.dependency_overrides[current_user] = lambda: {
+        "id": 1, "username": "test-admin", "role": "admin", "active": 1
+    }
+    try:
+        with TestClient(app) as client:
+            response = client.post("/api/mega/dns", json={"target": "example.com"})
+        assert response.status_code == 200
+        assert response.json() == expected
+    finally:
+        app.dependency_overrides.pop(current_user, None)
+
+
+def test_mega_web_check_endpoint_returns_bounded_check(monkeypatch):
+    from app.main import current_user
+    import app.main as main_module
+
+    expected = {
+        "host": "example.com",
+        "addresses": [{"address": "8.8.8.8", "family": "IPv4"}],
+        "https": {"status_code": 200, "reachable": True},
+        "http": {"status_code": 301, "reachable": True},
+        "notes": ["redirects were not followed"],
+    }
+    monkeypatch.setattr(main_module, "web_check", lambda target: expected)
+    app.dependency_overrides[current_user] = lambda: {
+        "id": 1, "username": "test-admin", "role": "admin", "active": 1
+    }
+    try:
+        with TestClient(app) as client:
+            response = client.post("/api/mega/web-check", json={"target": "https://example.com"})
+        assert response.status_code == 200
+        assert response.json() == expected
+    finally:
+        app.dependency_overrides.pop(current_user, None)
+
+def test_mega_scanner_returns_retryable_error_when_worker_slots_are_full(monkeypatch):
+    from app.main import current_user, MegaScannerBusy
+    import app.main as main_module
+
+    def busy_worker(_operation, _target):
+        raise MegaScannerBusy("Mega Scanner is busy; wait for an existing check to finish.")
+
+    monkeypatch.setattr(main_module, "_run_mega_bounded", busy_worker)
+    app.dependency_overrides[current_user] = lambda: {
+        "id": 1, "username": "test-admin", "role": "admin", "active": 1
+    }
+    try:
+        with TestClient(app) as client:
+            dns = client.post("/api/mega/dns", json={"target": "example.com"})
+            website = client.post("/api/mega/web-check", json={"target": "https://example.com"})
+        assert dns.status_code == 503
+        assert website.status_code == 503
+        assert dns.headers["retry-after"] == "3"
+        assert website.headers["retry-after"] == "3"
+    finally:
+        app.dependency_overrides.pop(current_user, None)
+
