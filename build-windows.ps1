@@ -8,7 +8,7 @@ if (-not (Get-Command py -ErrorAction SilentlyContinue)) {
 if (-not (Test-Path ".venv")) { py -3 -m venv .venv }
 & ".\.venv\Scripts\python.exe" -m pip install --upgrade pip
 & ".\.venv\Scripts\python.exe" -m pip install -r requirements.txt pyinstaller
-& ".\.venv\Scripts\python.exe" -m PyInstaller --clean --noconfirm --onefile --name NetScopePro run_desktop.py
+& ".\.venv\Scripts\python.exe" -m PyInstaller --clean --noconfirm --onefile --collect-submodules uvicorn --collect-submodules apscheduler --collect-submodules fastapi --collect-submodules starlette --name NetScopePro run_desktop.py
 
 Write-Host ""
 Write-Host "Build complete: $PSScriptRoot\dist\NetScopePro.exe" -ForegroundColor Green
