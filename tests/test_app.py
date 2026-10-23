@@ -71,7 +71,7 @@ def test_scan_rejects_unapproved_target_with_client_error():
             "INSERT INTO users(username,password_hash,role,created_at) VALUES(?,?,?,?)",
             (username, hash_password(password), "admin", "2026-01-01T00:00:00+00:00"),
         )
-    with TestClient(app) as client:
+    with TestClient(app, follow_redirects=False) as client:
         login = client.post("/api/login", data={"username": username, "password": password})
         assert login.status_code == 303
         response = client.post("/api/scans", json={"target": "192.0.2.1", "ports": [80]})
