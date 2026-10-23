@@ -35,3 +35,24 @@ def test_protected_dashboard_requires_login():
     with TestClient(app) as client:
         response = client.get("/api/dashboard")
     assert response.status_code == 401
+
+
+
+def test_cross_origin_post_is_rejected():
+    with TestClient(app) as client:
+        response = client.post("/api/logout", headers={"Origin": "https://attacker.example"})
+    assert response.status_code == 403
+    assert response.json()["detail"] == "Cross-origin request rejected."
+
+
+def test_login_rate_limit_blocks_repeated_failures():
+    from app.main import _login_failures
+    _login_failures.clear()
+    with TestClient(app) as client:
+        for _ in range(5):
+            response = client.post("/api/login", data={"username": "missing_rate_limit_user", "password": "wrong-password"})
+            assert response.status_code == 303
+        blocked = client.post("/api/login", data={"username": "missing_rate_limit_user", "password": "wrong-password"})
+    assert blocked.status_code == 303
+    assert "Too%20many%20login%20attempts" in blocked.headers["location"]
+    _login_failures.clear()
