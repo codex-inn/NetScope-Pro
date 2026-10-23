@@ -33,6 +33,17 @@ def normalize_host(target: str) -> str:
     raw = (target or "").strip()
     if not raw or len(raw) > 2048:
         raise TargetError("Enter a valid public domain, public IP, or HTTP(S) URL.")
+    # A bare IPv6 literal contains colons that urllib.parse interprets as a
+    # port separator. Recognize literals before parsing URL authority syntax.
+    if "://" not in raw:
+        try:
+            literal = ipaddress.ip_address(raw)
+        except ValueError:
+            pass
+        else:
+            if not literal.is_global:
+                raise TargetError("Only globally routable public IP addresses are allowed.")
+            return literal.compressed
     candidate = raw if "://" in raw else "//" + raw
     try:
         parsed = urlsplit(candidate)
@@ -49,11 +60,12 @@ def normalize_host(target: str) -> str:
         raise TargetError("Enter a valid public domain or IP address.")
     try:
         ip = ipaddress.ip_address(host)
+    except ValueError:
+        ip = None
+    if ip is not None:
         if not ip.is_global:
             raise TargetError("Only globally routable public IP addresses are allowed.")
         return ip.compressed
-    except ValueError:
-        pass
     try:
         host = host.rstrip(".").encode("idna").decode("ascii").lower()
     except UnicodeError as exc:
@@ -108,19 +120,13 @@ def _connect_public(host: str, ip_text: str, port: int, use_tls: bool):
         if not use_tls:
             return raw, None
         context = ssl.create_default_context()
-        wrapped = context.wrap_socket(raw, server_hostname=host if not _is_ip(host) else None)
+        # Passing IP literals through server_hostname enables certificate IP SAN
+        # matching while OpenSSL omits the DNS-only SNI extension for IPs.
+        wrapped = context.wrap_socket(raw, server_hostname=host)
         return wrapped, context
     except Exception:
         raw.close()
         raise
-
-
-def _is_ip(value: str) -> bool:
-    try:
-        ipaddress.ip_address(value)
-        return True
-    except ValueError:
-        return False
 
 
 def _request(host: str, ip_text: str, port: int, use_tls: bool) -> dict:
@@ -216,3 +222,4 @@ def _flatten_cert_name(value) -> str | None:
         for key, item in group:
             parts.append(f"{key}={item}")
     return ", ".join(parts)[:500] or None
+
