@@ -189,3 +189,17 @@ def test_mega_scanner_returns_retryable_error_when_worker_slots_are_full(monkeyp
     finally:
         app.dependency_overrides.pop(current_user, None)
 
+def test_static_scan_ui_uses_deployed_worker_as_default_api():
+    index = Path(__file__).resolve().parents[1] / "index.html"
+    html = index.read_text(encoding="utf-8")
+    assert "https://netscope-pro-scan-api.kowshik-educ.workers.dev" in html
+    assert "const DEFAULT_SCAN_API=" in html
+
+
+def test_static_scan_ui_explains_missing_worker_allowlist():
+    index = Path(__file__).resolve().parents[1] / "index.html"
+    html = index.read_text(encoding="utf-8")
+    assert "configured_targets: 0" in html
+    assert "ALLOWED_SCAN_TARGETS" in html
+    assert "Check API connection" in html
+
