@@ -15,6 +15,7 @@ from typing import Annotated
 from dotenv import load_dotenv
 from fastapi import Depends, FastAPI, Form, HTTPException, Request, status
 from fastapi.responses import HTMLResponse, RedirectResponse, JSONResponse
+from apscheduler.schedulers.asyncio import AsyncIOScheduler
 from starlette.middleware.sessions import SessionMiddleware
 
 from app.security import hash_password, verify_password, validate_target, validate_ports, ALLOWED_PORTS
@@ -37,6 +38,7 @@ app = FastAPI(title=APP_NAME, docs_url=None, redoc_url=None)
 app.add_middleware(SessionMiddleware, secret_key=SECRET_KEY, same_site="strict", https_only=False)
 scan_semaphore = asyncio.Semaphore(MAX_CONCURRENT)
 scheduler_jobs: dict[int, dict] = {}
+scheduler = AsyncIOScheduler(timezone="UTC")
 
 
 def now() -> str:
@@ -86,7 +88,7 @@ def init_db() -> None:
         username = os.getenv("BOOTSTRAP_ADMIN_USERNAME", "admin").strip() or "admin"
         password = os.getenv("BOOTSTRAP_ADMIN_PASSWORD", "")
         existing = con.execute("SELECT id FROM users WHERE username=?", (username,)).fetchone()
-        if not existing and len(password) >= 12:
+        if not existing and len(password) >= 12 and not password.startswith("ChangeThis-") and not password.startswith("replace-"):
             con.execute("INSERT INTO users(username,password_hash,role,created_at) VALUES(?,?,?,?)",
                         (username, hash_password(password), "admin", now()))
             con.execute("INSERT INTO audit(actor,action,detail,created_at) VALUES(?,?,?,?)",
@@ -94,6 +96,55 @@ def init_db() -> None:
 
 
 init_db()
+
+
+async def execute_scheduled_scan(schedule_id: int) -> None:
+    with db() as con:
+        row = con.execute("SELECT * FROM schedules WHERE id=? AND enabled=1", (schedule_id,)).fetchone()
+        running = con.execute("SELECT COUNT(*) FROM scans WHERE status='running'").fetchone()[0]
+    if not row or running >= MAX_CONCURRENT:
+        return
+    try:
+        target = validate_target(row["target"], MAX_HOSTS)
+        ports = validate_ports(safe_json(row["ports"], []), MAX_PORTS)
+    except ValueError as exc:
+        audit("scheduler", "scheduled_scan_rejected", f"id={schedule_id}: {exc}")
+        return
+    with db() as con:
+        cur = con.execute("INSERT INTO scans(target,ports,status,started_at,requested_by) VALUES(?,?,?,?,?)",
+                          (target, json.dumps(ports), "running", now(), f"schedule:{schedule_id}"))
+        scan_id = cur.lastrowid
+    audit("scheduler", "scheduled_scan_started", f"schedule_id={schedule_id}; scan_id={scan_id}")
+    asyncio.create_task(run_nmap(scan_id, target, ports, f"schedule:{schedule_id}"))
+
+
+def register_schedule(schedule_id: int, interval_minutes: int) -> None:
+    job_id = f"netscope-schedule-{schedule_id}"
+    if scheduler.running and scheduler.get_job(job_id):
+        scheduler.remove_job(job_id)
+    if scheduler.running:
+        scheduler.add_job(execute_scheduled_scan, "interval", minutes=interval_minutes,
+                          args=[schedule_id], id=job_id, replace_existing=True, max_instances=1,
+                          coalesce=True, next_run_time=None)
+
+
+@app.on_event("startup")
+async def start_optional_scheduler():
+    if os.getenv("SCHEDULER_ENABLED", "false").lower() != "true":
+        return
+    scheduler.start()
+    with db() as con:
+        rows = con.execute("SELECT id,interval_minutes FROM schedules WHERE enabled=1").fetchall()
+    for row in rows:
+        scheduler.add_job(execute_scheduled_scan, "interval", minutes=row["interval_minutes"],
+                          args=[row["id"]], id=f"netscope-schedule-{row['id']}",
+                          replace_existing=True, max_instances=1, coalesce=True)
+
+
+@app.on_event("shutdown")
+async def stop_optional_scheduler():
+    if scheduler.running:
+        scheduler.shutdown(wait=False)
 
 
 def audit(actor: str, action: str, detail: str = "") -> None:
@@ -343,6 +394,26 @@ async def create_user(request: Request, user: dict = Depends(admin_user)):
         raise HTTPException(409, "Username already exists.")
     audit(user["username"], "user_created", json.dumps({"username": username, "role": role}))
     return {"id": cur.lastrowid, "username": username, "role": role}
+
+
+@app.post("/api/schedules/{schedule_id}/enable")
+async def set_schedule_enabled(schedule_id: int, request: Request, user: dict = Depends(admin_user)):
+    if os.getenv("SCHEDULER_ENABLED", "false").lower() != "true":
+        raise HTTPException(403, "Scheduler is disabled in .env. Set SCHEDULER_ENABLED=true after reviewing the approved scope.")
+    payload = await request.json()
+    enabled = bool(payload.get("enabled", False))
+    with db() as con:
+        row = con.execute("SELECT * FROM schedules WHERE id=?", (schedule_id,)).fetchone()
+        if not row:
+            raise HTTPException(404, "Schedule not found.")
+        con.execute("UPDATE schedules SET enabled=? WHERE id=?", (1 if enabled else 0, schedule_id))
+    job_id = f"netscope-schedule-{schedule_id}"
+    if enabled:
+        register_schedule(schedule_id, int(row["interval_minutes"]))
+    elif scheduler.running and scheduler.get_job(job_id):
+        scheduler.remove_job(job_id)
+    audit(user["username"], "schedule_enabled" if enabled else "schedule_disabled", str(schedule_id))
+    return {"id": schedule_id, "enabled": enabled}
 
 
 @app.get("/api/schedules")
