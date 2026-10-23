@@ -12,6 +12,8 @@
 - 🔍 Conservative Nmap TCP connect scans
 - 🗃️ SQLite storage and audit logging
 - ⏱️ Optional scheduled scans (disabled by default)
+- 🌐 Mega Tools: public DNS/IP lookup, HTTP/HTTPS reachability, TLS certificate checks, and common security-header observations
+- 📤 JSON export of recent scan history and alerts
 
 ## 🧰 Requirements
 
@@ -44,6 +46,10 @@ python -m uvicorn app.main:app --host 127.0.0.1 --port 8765
 ```
 
 Open **http://127.0.0.1:8765** and sign in with the bootstrap admin credentials from `.env`.
+
+## 🌐 Mega Scanner tools
+
+Open **Mega tools** after signing in to use public DNS/IP lookup and basic website checks. The web checker tests HTTP/HTTPS on ports 80/443, verifies TLS using the local trust store, and reports common security headers. It rejects non-public resolved addresses and does not follow redirects. Missing headers are review hints, not proof of a vulnerability. Nmap scans still require the target to be explicitly included in `APPROVED_CIDRS`. See [docs/MEGA-SCANNER.md](docs/MEGA-SCANNER.md) for details. Use only targets you own or are authorized to assess.
 
 ## 🪟 Windows executable
 
