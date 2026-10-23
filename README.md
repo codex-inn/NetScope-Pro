@@ -1,30 +1,27 @@
-# NetScope Pro
+# 🔎 NetScope Pro
 
-Windows-first network inventory and bounded TCP-port auditing dashboard using Python, FastAPI, SQLite, and Nmap. Use only on networks you own or are explicitly authorized to administer.
+**A local-first network inventory and TCP port auditing dashboard** built with FastAPI, SQLite, and Nmap.
 
-## Safety defaults
+> 🛡️ **Authorized use only.** Scan only systems and networks you own or have explicit permission to test.
 
-- Scanning is disabled until APPROVED_CIDRS is configured in .env.
-- Requested targets must be fully contained in an approved CIDR.
-- IPv4 target size is capped (default 256 addresses).
-- TCP ports come from a fixed common-port allowlist; at most 25 per job by default.
-- Conservative Nmap connect scans only: no scripts, OS detection, or version detection.
-- Local-only bind by default (127.0.0.1); do not expose this app directly to the internet.
-- Per-process login throttling and same-origin checks for browser POST requests.
-- Security response headers and HTML escaping for untrusted login-page content.
-- Users, scan jobs, findings, and audit events are stored in SQLite.
-- No scan runs automatically at startup.
+## ✨ Features
 
-## Requirements
+- 📊 Responsive dashboard, scan history, and alerts
+- 👥 Admin and operator roles
+- 🎯 Approved CIDR and TCP-port restrictions
+- 🔍 Conservative Nmap TCP connect scans
+- 🗃️ SQLite storage and audit logging
+- ⏱️ Optional scheduled scans (disabled by default)
+
+## 🧰 Requirements
 
 - Windows 10/11
 - Python 3.11+
-- Nmap for Windows: https://nmap.org/download.html
+- [Nmap for Windows](https://nmap.org/download.html)
 
-## Install (PowerShell)
+## 🚀 Quick start
 
-1. Install Python and Nmap. Ensure nmap.exe is available on PATH.
-2. In this repository run:
+In PowerShell, from the project folder:
 
 ```powershell
 py -3 -m venv .venv
@@ -35,46 +32,39 @@ Copy-Item .env.example .env
 notepad .env
 ```
 
-3. Set APP_SECRET_KEY to a long random secret, set a strong BOOTSTRAP_ADMIN_PASSWORD (at least 12 characters), and add only written-authorized target CIDRs to APPROVED_CIDRS. Separate CIDRs with commas. Scanning stays disabled if this value is empty.
-4. Verify Nmap with `nmap --version`.
-5. Start the app:
+Edit `.env` before starting:
+- Set a long, random `APP_SECRET_KEY`.
+- Set a strong `BOOTSTRAP_ADMIN_PASSWORD` (12+ characters).
+- Add only authorized network ranges to `APPROVED_CIDRS` (comma-separated). **Leave it empty to keep scanning disabled.**
+
+Confirm Nmap is installed with `nmap --version`, then run:
 
 ```powershell
 python -m uvicorn app.main:app --host 127.0.0.1 --port 8765
 ```
 
-6. Open http://127.0.0.1:8765 and sign in using the bootstrap admin credentials from .env.
+Open **http://127.0.0.1:8765** and sign in with the bootstrap admin credentials from `.env`.
 
-## Features
+## 🪟 Windows executable
 
-- Responsive dashboard, device inventory, scan history, alerts
-- Administrator and operator roles
-- CIDR allowlist validation, target/port limits, job concurrency limit
-- Conservative Nmap TCP connect scans with timeout
-- SQLite persistence and audit logging
-- Admin user-management API
-- Optional scheduler configuration (disabled by default)
+Download the latest successful build from [GitHub Actions](https://github.com/codex-inn/NetScope-Pro/actions/workflows/windows-build.yml). Open a successful run, download the **NetScopePro-Windows** artifact, and extract the ZIP. Artifacts expire according to GitHub's retention period. Nmap must still be installed separately.
 
-## API
-
-- GET / — dashboard
-- GET /api/health — health status
-- POST /api/login and POST /api/logout — session login/logout
-- GET /api/dashboard — counts and recent jobs
-- GET /api/scans and POST /api/scans — history and start a bounded scan
-- GET /api/alerts — alerts
-- GET /api/users and POST /api/users — administrator-only user management
-- GET /api/schedules and POST /api/schedules — administrator-only schedule configuration
-
-## Tests
+## 🧪 Tests
 
 ```powershell
 pip install -r requirements-dev.txt
 python -m pytest
 ```
 
-Tests run on Ubuntu and Windows via GitHub Actions. They validate authentication, request-origin checks, response headers, escaping, input limits and scan scope; they do not scan a live network or replace an end-to-end installation test.
+GitHub Actions runs the test suite on Windows and Ubuntu. These tests do not verify scans against a live network.
 
-## Limitations
+## ⚠️ Security notes
 
-This is an MVP, not a certified security product. It may not identify every device on switched networks or discover MAC addresses across routers. Findings are indicators for review, not proof of compromise. Login throttling is in-memory per process, so it is not a substitute for a shared limiter in a multi-worker deployment. Origin checks are a useful browser defense but not a full CSRF-token implementation. Before institutional deployment, add a formal CSRF token, secret rotation, backups/restore, managed TLS, retention controls, and an independent security review.
+- Binds to `127.0.0.1` by default; **do not expose it directly to the internet**.
+- Scan scope and port count are restricted, but results may not reveal every device.
+- This is an MVP, not a certified security product or a substitute for an independent security review.
+- Review [SECURITY.md](SECURITY.md) and the [operations checklist](docs/OPERATIONS.md) before use.
+
+## 📄 License
+
+See [LICENSE](LICENSE).
