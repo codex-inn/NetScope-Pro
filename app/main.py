@@ -226,7 +226,7 @@ def index(request: Request):
             user = None
     if not user:
         return HTMLResponse(LOGIN_HTML.replace("__ERROR__", html_escape(request.query_params.get("error", ""))))
-    return HTMLResponse(DASHBOARD_HTML.replace("__USER__", user["username"]).replace("__ROLE__", user["role"]))
+    return HTMLResponse(DASHBOARD_HTML.replace("__USER__", html_escape(user["username"])).replace("__ROLE__", html_escape(user["role"])))
 
 
 @app.get("/api/dashboard")
@@ -446,7 +446,7 @@ async def create_schedule(request: Request, user: dict = Depends(admin_user)):
         cur = con.execute("INSERT INTO schedules(target,ports,interval_minutes,enabled,created_by,created_at) VALUES(?,?,?,?,?,?)",
                           (target, json.dumps(ports), interval, 0, user["username"], now()))
     audit(user["username"], "schedule_created_disabled", str(cur.lastrowid))
-    return {"id": cur.lastrowid, "enabled": False, "message": "Saved disabled. Scheduling execution is not activated in this MVP."}
+    return {"id": cur.lastrowid, "enabled": False, "message": "Saved disabled. An administrator must explicitly enable this schedule after reviewing the approved scope."}
 
 
 LOGIN_HTML = """<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>NetScope Pro · Sign in</title><style>
@@ -458,7 +458,7 @@ DASHBOARD_HTML = """<!doctype html><html lang="en"><head><meta charset="utf-8"><
 <section id="scans" class="panel hidden"><div class="sectionhead"><h2>Scan history</h2><button class="secondary" onclick="loadScans()">Refresh</button></div><div id="scansTable" class="empty">Loading…</div></section>
 <section id="alerts" class="panel hidden"><div class="sectionhead"><h2>Security alerts</h2><button class="secondary" onclick="loadAlerts()">Refresh</button></div><div id="alertsList" class="empty">Loading…</div></section>
 <section id="users" class="panel hidden"><div class="sectionhead"><h2>User management</h2><span class="pill">Admin only</span></div><div class="formrow"><div><label>New username</label><input id="newUsername" placeholder="network_operator"></div><div><label>Temporary password (12+ chars)</label><input id="newPassword" type="password" placeholder="Use a strong password"></div></div><label>Role</label><select id="newRole"><option value="operator">Operator — scan and view</option><option value="admin">Administrator — manage users</option></select><button onclick="createUser()">Create user</button><div id="usersList" style="margin-top:18px"></div></section>
-<section id="schedules" class="panel hidden"><div class="sectionhead"><h2>Scheduled scans</h2><span class="pill">Disabled by default</span></div><p class="muted">Scheduling execution is intentionally not activated in this MVP. Saved schedules remain disabled; enablement requires a deliberate configuration and review.</p><div class="formrow"><div><label>Approved target / CIDR</label><input id="scheduleTarget" placeholder="approved CIDR"></div><div><label>Interval (60–10080 minutes)</label><input id="scheduleInterval" type="number" min="60" max="10080" value="1440"></div></div><label>TCP ports</label><input id="schedulePorts" value="22,80,443"><button onclick="createSchedule()">Save disabled schedule</button><div id="scheduleList" style="margin-top:18px"></div></section>
+<section id="schedules" class="panel hidden"><div class="sectionhead"><h2>Scheduled scans</h2><span class="pill">Disabled by default</span></div><p class="muted">Scheduling is opt-in. Saved schedules remain disabled until an administrator enables scheduling in .env and explicitly enables each reviewed schedule.</p><div class="formrow"><div><label>Approved target / CIDR</label><input id="scheduleTarget" placeholder="approved CIDR"></div><div><label>Interval (60–10080 minutes)</label><input id="scheduleInterval" type="number" min="60" max="10080" value="1440"></div></div><label>TCP ports</label><input id="schedulePorts" value="22,80,443"><button onclick="createSchedule()">Save disabled schedule</button><div id="scheduleList" style="margin-top:18px"></div></section>
 </main></div><script>
 async function api(url,opts={}){const r=await fetch(url,{...opts,headers:{'Content-Type':'application/json',...(opts.headers||{})}});let d;try{d=await r.json()}catch{d={detail:await r.text()}}if(!r.ok)throw new Error(d.detail||'Request failed');return d}
 function toast(s){document.getElementById('toast').textContent=s;setTimeout(()=>document.getElementById('toast').textContent='',6000)}
