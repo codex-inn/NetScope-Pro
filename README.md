@@ -1,82 +1,36 @@
-# 🔎 NetScope Pro
+# NetScope Pro Web
 
-**A local-first network inventory and TCP port auditing dashboard** built with FastAPI, SQLite, and Nmap.
+**A browser-first web security workspace. No executable download is required.**
 
-> 🛡️ **Authorized use only.** Scan only systems and networks you own or have explicit permission to test.
+Public website: https://codex-inn.github.io/NetScope-Pro/
 
-## ✨ Features
+NetScope Pro Web is designed to run from a normal browser. It provides a responsive dashboard for URL structure analysis, public DNS-over-HTTPS lookups, caution indicators, local browser history, and printable/copyable reports.
 
-- 📊 Responsive dashboard, scan history, and alerts
-- 👥 Admin and operator roles
-- 🎯 Approved CIDR and TCP-port restrictions
-- 🔍 Conservative Nmap TCP connect scans
-- 🗃️ SQLite storage and audit logging
-- ⏱️ Optional scheduled scans (disabled by default)
-- 🌐 Mega Tools: public DNS/IP lookup, HTTP/HTTPS reachability, TLS certificate checks, and common security-header observations
-- 🔗 Link verification with check-level Verified/Unverified/Suspicious/Failed results and explicit caveats
-- 📶 Read-only Windows Wi-Fi and local network snapshot (SSID, signal, channel, authentication, IPv4 and gateway where available)
-- 📤 JSON export of recent scan history and alerts
+## Features
 
-## 🧰 Requirements
+- Responsive dashboard with Overview, Link Analyzer, DNS Inspector, Analysis History, and Network Tools
+- URL parsing and visible indicators for HTTP vs HTTPS, punycode, embedded user information, explicit ports, IP literals, and known shortener domains
+- Public DNS lookups using Cloudflare DNS-over-HTTPS for A, AAAA, MX, NS, TXT, and CAA records
+- Clear per-check labels: Verified, Unverified, Suspicious, and Failed
+- Recent analysis history stored in the browser's local storage
+- Copyable findings and Print / Save PDF reports
+- No login, executable, extension, or local installation needed for the website
 
-- Windows 10/11
-- Python 3.11+
-- [Nmap for Windows](https://nmap.org/download.html)
+## Open the website
 
-## 🚀 Quick start
+1. Visit https://codex-inn.github.io/NetScope-Pro/
+2. Enter a URL in **Quick analysis** and select **Analyze link**.
+3. Review each check separately; use **DNS Inspector** to inspect public DNS records.
+4. Copy findings or choose **Print / Save PDF** to save a report.
 
-In PowerShell, from the project folder:
+## Important browser-only limits
 
-```powershell
-py -3 -m venv .venv
-.\.venv\Scripts\Activate.ps1
-python -m pip install --upgrade pip
-pip install -r requirements.txt
-Copy-Item .env.example .env
-notepad .env
-```
+A public static website cannot access the computer's Wi-Fi SSID/password, inspect nearby devices, scan private LAN ports, or reliably inspect arbitrary websites' TLS certificates and response headers. Those operations require a separately deployed backend or local agent, which is intentionally outside this web-only edition.
 
-Edit `.env` before starting:
-- Set a long, random `APP_SECRET_KEY`.
-- Set a strong `BOOTSTRAP_ADMIN_PASSWORD` (12+ characters).
-- Add only authorized network ranges to `APPROVED_CIDRS` (comma-separated). **Leave it empty to keep scanning disabled.**
+This analyzer does not fetch arbitrary website pages or follow redirects. DNS records and URL patterns are indicators only—not proof that a website is safe or malicious. A site can be harmful even if every visible check passes. Avoid entering URLs containing session tokens, passwords, or private identifiers. DNS queries send the queried hostname to Cloudflare's public DNS-over-HTTPS service.
 
-Confirm Nmap is installed with `nmap --version`, then run:
+## Development
 
-```powershell
-python -m uvicorn app.main:app --host 127.0.0.1 --port 8765
-```
+The site is a static HTML/CSS/JavaScript app in `index.html`. No build step or package installation is needed. For local preview, open `index.html` in a modern browser or use any static web server.
 
-Open **http://127.0.0.1:8765** and sign in with the bootstrap admin credentials from `.env`.
-
-## 🔗 Link verification and local Wi-Fi audit
-
-The Link Verification panel reuses the public-target-safe website checker and reports DNS, HTTP/HTTPS reachability, TLS verification, and review hints for shortener/punycode hosts. It does not follow redirects and does not guarantee a link is harmless. The Wi-Fi / Local panel uses read-only Windows commands to show connection details and basic IPv4/gateway information where the OS exposes them; it never retrieves saved Wi-Fi passwords or disconnects devices.
-
-## 🌐 Mega Scanner tools
-
-Open **Mega tools** after signing in to use public DNS/IP lookup and basic website checks. The web checker tests HTTP/HTTPS on ports 80/443, verifies TLS using the local trust store, and reports common security headers. It rejects non-public resolved addresses and does not follow redirects. Missing headers are review hints, not proof of a vulnerability. Nmap scans still require the target to be explicitly included in `APPROVED_CIDRS`. See [docs/MEGA-SCANNER.md](docs/MEGA-SCANNER.md) for details. Use only targets you own or are authorized to assess.
-
-## 🪟 Windows executable
-
-Download the latest successful build from [GitHub Actions](https://github.com/codex-inn/NetScope-Pro/actions/workflows/windows-build.yml). Open a successful run, download the **NetScopePro-Windows** artifact, and extract the ZIP. Artifacts expire according to GitHub's retention period. Nmap must still be installed separately.
-
-## 🧪 Tests
-
-```powershell
-pip install -r requirements-dev.txt
-python -m pytest
-```
-
-GitHub Actions runs the test suite on Windows and Ubuntu. These tests do not verify scans against a live network.
-
-## ⚠️ Security notes
-
-- Binds to `127.0.0.1` by default; **do not expose it directly to the internet**.
-- Scan scope and port count are restricted, but results may not reveal every device.
-- This is an MVP, not a certified security product or a substitute for an independent security review.
-- Review [SECURITY.md](SECURITY.md) and the [operations checklist](docs/OPERATIONS.md) before use.
-
-## 📄 License
-
-See [LICENSE](LICENSE).
+Only assess URLs and systems you are authorized to inspect.
