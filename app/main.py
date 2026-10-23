@@ -18,7 +18,7 @@ from fastapi.responses import HTMLResponse, RedirectResponse, JSONResponse
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
 from starlette.middleware.sessions import SessionMiddleware
 
-from app.security import hash_password, verify_password, validate_target, validate_ports, ALLOWED_PORTS
+from app.security import hash_password, verify_password, validate_target, validate_ports, ALLOWED_PORTS, html_escape
 
 load_dotenv()
 APP_NAME = os.getenv("APP_NAME", "NetScope Pro")
@@ -96,6 +96,16 @@ def init_db() -> None:
 
 
 init_db()
+
+
+@app.middleware("http")
+async def add_security_headers(request: Request, call_next):
+    response = await call_next(request)
+    response.headers["X-Content-Type-Options"] = "nosniff"
+    response.headers["X-Frame-Options"] = "DENY"
+    response.headers["Referrer-Policy"] = "no-referrer"
+    response.headers["Content-Security-Policy"] = "default-src 'self'; object-src 'none'; base-uri 'self'; frame-ancestors 'none'; form-action 'self'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline'"
+    return response
 
 
 async def execute_scheduled_scan(schedule_id: int) -> None:
@@ -215,7 +225,7 @@ def index(request: Request):
         except HTTPException:
             user = None
     if not user:
-        return HTMLResponse(LOGIN_HTML.replace("__ERROR__", request.query_params.get("error", "")))
+        return HTMLResponse(LOGIN_HTML.replace("__ERROR__", html_escape(request.query_params.get("error", ""))))
     return HTMLResponse(DASHBOARD_HTML.replace("__USER__", user["username"]).replace("__ROLE__", user["role"]))
 
 
