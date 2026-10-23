@@ -121,3 +121,49 @@ def test_mega_scanner_rejects_non_object_json(monkeypatch):
     finally:
         app.dependency_overrides.pop(current_user, None)
 
+def test_mega_dns_endpoint_returns_lookup_result(monkeypatch):
+    from app.main import current_user
+    import app.main as main_module
+
+    expected = {
+        "host": "example.com",
+        "canonical_name": "example.com",
+        "addresses": [{"address": "8.8.8.8", "family": "IPv4"}],
+        "checked_at": "2026-10-23T00:00:00+00:00",
+    }
+    monkeypatch.setattr(main_module, "resolve_public_host", lambda target: expected)
+    app.dependency_overrides[current_user] = lambda: {
+        "id": 1, "username": "test-admin", "role": "admin", "active": 1
+    }
+    try:
+        with TestClient(app) as client:
+            response = client.post("/api/mega/dns", json={"target": "example.com"})
+        assert response.status_code == 200
+        assert response.json() == expected
+    finally:
+        app.dependency_overrides.pop(current_user, None)
+
+
+def test_mega_web_check_endpoint_returns_bounded_check(monkeypatch):
+    from app.main import current_user
+    import app.main as main_module
+
+    expected = {
+        "host": "example.com",
+        "addresses": [{"address": "8.8.8.8", "family": "IPv4"}],
+        "https": {"status_code": 200, "reachable": True},
+        "http": {"status_code": 301, "reachable": True},
+        "notes": ["redirects were not followed"],
+    }
+    monkeypatch.setattr(main_module, "web_check", lambda target: expected)
+    app.dependency_overrides[current_user] = lambda: {
+        "id": 1, "username": "test-admin", "role": "admin", "active": 1
+    }
+    try:
+        with TestClient(app) as client:
+            response = client.post("/api/mega/web-check", json={"target": "https://example.com"})
+        assert response.status_code == 200
+        assert response.json() == expected
+    finally:
+        app.dependency_overrides.pop(current_user, None)
+
