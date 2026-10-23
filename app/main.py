@@ -40,6 +40,33 @@ scan_semaphore = asyncio.Semaphore(MAX_CONCURRENT)
 scheduler_jobs: dict[int, dict] = {}
 scheduler = AsyncIOScheduler(timezone="UTC")
 
+# Lightweight per-process login throttling. For multi-worker/public deployments, use a
+# shared rate-limit store and a reverse proxy; this MVP is intended for localhost use.
+LOGIN_MAX_ATTEMPTS = max(3, min(int(os.getenv("LOGIN_MAX_ATTEMPTS", "5")), 20))
+LOGIN_WINDOW_SECONDS = max(60, min(int(os.getenv("LOGIN_WINDOW_SECONDS", "900")), 3600))
+_login_failures: dict[str, list[float]] = {}
+
+
+def login_is_limited(key: str, current_time: float | None = None) -> bool:
+    current_time = time.time() if current_time is None else current_time
+    cutoff = current_time - LOGIN_WINDOW_SECONDS
+    failures = [stamp for stamp in _login_failures.get(key, []) if stamp > cutoff]
+    _login_failures[key] = failures
+    return len(failures) >= LOGIN_MAX_ATTEMPTS
+
+
+def record_login_failure(key: str, current_time: float | None = None) -> None:
+    current_time = time.time() if current_time is None else current_time
+    cutoff = current_time - LOGIN_WINDOW_SECONDS
+    # Periodically discard stale keys to keep memory bounded.
+    for old_key in list(_login_failures):
+        recent = [stamp for stamp in _login_failures[old_key] if stamp > cutoff]
+        if recent:
+            _login_failures[old_key] = recent
+        else:
+            _login_failures.pop(old_key, None)
+    _login_failures.setdefault(key, []).append(current_time)
+
 
 def now() -> str:
     return datetime.now(timezone.utc).isoformat(timespec="seconds")
@@ -195,11 +222,19 @@ def health():
 
 @app.post("/api/login")
 def login(request: Request, username: Annotated[str, Form()], password: Annotated[str, Form()]):
+    normalized_username = username.strip()[:80] or "unknown"
+    client_host = request.client.host if request.client else "unknown"
+    rate_key = f"{client_host}:{normalized_username.casefold()}"
+    if login_is_limited(rate_key):
+        audit(normalized_username, "login_rate_limited", client_host)
+        return RedirectResponse("/?error=Too%20many%20login%20attempts.%20Wait%2015%20minutes.", status_code=303)
     with db() as con:
         row = con.execute("SELECT * FROM users WHERE username=? AND active=1", (username.strip(),)).fetchone()
     if not row or not verify_password(password, row["password_hash"]):
-        audit(username.strip()[:80] or "unknown", "login_failed")
+        record_login_failure(rate_key)
+        audit(normalized_username, "login_failed", client_host)
         return RedirectResponse("/?error=Invalid%20username%20or%20password", status_code=303)
+    _login_failures.pop(rate_key, None)
     request.session.clear()
     request.session["uid"] = row["id"]
     request.session["username"] = row["username"]
