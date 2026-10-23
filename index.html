@@ -137,7 +137,7 @@ const API_KEY='netscope-pro-api-url';
 const apiInput=$('scan-api'), targetInput=$('scan-target'), scanStatus=$('scan-status'), scanRun=$('scan-run'), scanHealth=$('scan-health'), scanResults=$('scan-results'), scanExport=$('scan-export');
 const DEFAULT_SCAN_API='https://netscope-pro-scan-api.kowshik-educ.workers.dev';
 try{apiInput.value=localStorage.getItem(API_KEY)||DEFAULT_SCAN_API}catch{apiInput.value=DEFAULT_SCAN_API}
-function apiBase(){const raw=apiInput.value.trim().replace(/\\/$/,'');if(!raw)throw Error('Enter the deployed Cloudflare Worker base URL first.');let u;try{u=new URL(raw)}catch{throw Error('API URL is invalid.')}if(u.protocol!=='https:'&&u.hostname!=='localhost')throw Error('Use an HTTPS API URL.');return raw}
+function apiBase(){const raw=apiInput.value.trim().replace(/\/+$/,'');if(!raw)throw Error('Enter the deployed Cloudflare Worker base URL first.');let u;try{u=new URL(raw)}catch{throw Error('API URL is invalid.')}if(u.protocol!=='https:'&&u.hostname!=='localhost')throw Error('Use an HTTPS API URL.');return raw}
 function scanMessage(message,kind){scanStatus.textContent=message;scanStatus.style.borderColor=kind==='error'?'var(--red)':kind==='ok'?'var(--green)':'var(--line)'}
 function selectedPorts(){return [...document.querySelectorAll('input[name="scan-port"]:checked')].map(e=>Number(e.value))}
 let lastScan=null;
