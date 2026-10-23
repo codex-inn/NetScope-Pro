@@ -7,6 +7,7 @@ import os
 import shutil
 import sqlite3
 import sys
+import threading
 import time
 from datetime import datetime, timezone
 from pathlib import Path
@@ -20,6 +21,25 @@ from starlette.middleware.sessions import SessionMiddleware
 
 from app.security import hash_password, verify_password, validate_target, validate_ports, approved_networks, ALLOWED_PORTS, html_escape
 from app.mega_scanner import TargetError, resolve_public_host, web_check
+
+# Keep timed-out DNS/network worker threads bounded. asyncio cancellation cannot
+# stop a blocking getaddrinfo/socket call already running in a worker thread.
+MEGA_WORKER_LIMIT = max(1, min(int(os.getenv("MEGA_WORKER_LIMIT", "4")), 8))
+_mega_worker_slots = threading.BoundedSemaphore(MEGA_WORKER_LIMIT)
+
+
+class MegaScannerBusy(RuntimeError):
+    """Raised when all bounded Mega Scanner worker slots are occupied."""
+
+
+def _run_mega_bounded(operation, target: str):
+    if not _mega_worker_slots.acquire(blocking=False):
+        raise MegaScannerBusy("Mega Scanner is busy; wait for an existing check to finish.")
+    try:
+        return operation(target)
+    finally:
+        _mega_worker_slots.release()
+
 
 load_dotenv()
 APP_NAME = os.getenv("APP_NAME", "NetScope Pro")
@@ -545,7 +565,9 @@ async def mega_dns(request: Request, user: dict = Depends(current_user)):
     if not isinstance(payload, dict):
         raise HTTPException(400, "Request body must be a JSON object.")
     try:
-        result = await asyncio.wait_for(asyncio.to_thread(resolve_public_host, str(payload.get("target", ""))), timeout=8)
+        result = await asyncio.wait_for(asyncio.to_thread(_run_mega_bounded, resolve_public_host, str(payload.get("target", ""))), timeout=8)
+    except MegaScannerBusy as exc:
+        raise HTTPException(503, str(exc), headers={"Retry-After": "3"})
     except TargetError as exc:
         audit(user["username"], "mega_dns_rejected", str(exc))
         raise HTTPException(400, str(exc))
@@ -564,7 +586,9 @@ async def mega_web_check(request: Request, user: dict = Depends(current_user)):
     if not isinstance(payload, dict):
         raise HTTPException(400, "Request body must be a JSON object.")
     try:
-        result = await asyncio.wait_for(asyncio.to_thread(web_check, str(payload.get("target", ""))), timeout=18)
+        result = await asyncio.wait_for(asyncio.to_thread(_run_mega_bounded, web_check, str(payload.get("target", ""))), timeout=18)
+    except MegaScannerBusy as exc:
+        raise HTTPException(503, str(exc), headers={"Retry-After": "3"})
     except TargetError as exc:
         audit(user["username"], "mega_web_check_rejected", str(exc))
         raise HTTPException(400, str(exc))
