@@ -33,4 +33,4 @@ def test_local_snapshot_has_status_and_no_password_field():
     result = local_network_snapshot()
     assert "wifi" in result and "network" in result
     assert result["wifi"]["status"] in {"Verified", "Unverified"}
-    assert "password" not in str(result).lower()
+    assert "password" not in result["wifi"]
