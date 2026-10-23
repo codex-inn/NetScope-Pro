@@ -13,6 +13,8 @@
 - 🗃️ SQLite storage and audit logging
 - ⏱️ Optional scheduled scans (disabled by default)
 - 🌐 Mega Tools: public DNS/IP lookup, HTTP/HTTPS reachability, TLS certificate checks, and common security-header observations
+- 🔗 Link verification with check-level Verified/Unverified/Suspicious/Failed results and explicit caveats
+- 📶 Read-only Windows Wi-Fi and local network snapshot (SSID, signal, channel, authentication, IPv4 and gateway where available)
 - 📤 JSON export of recent scan history and alerts
 
 ## 🧰 Requirements
@@ -46,6 +48,10 @@ python -m uvicorn app.main:app --host 127.0.0.1 --port 8765
 ```
 
 Open **http://127.0.0.1:8765** and sign in with the bootstrap admin credentials from `.env`.
+
+## 🔗 Link verification and local Wi-Fi audit
+
+The Link Verification panel reuses the public-target-safe website checker and reports DNS, HTTP/HTTPS reachability, TLS verification, and review hints for shortener/punycode hosts. It does not follow redirects and does not guarantee a link is harmless. The Wi-Fi / Local panel uses read-only Windows commands to show connection details and basic IPv4/gateway information where the OS exposes them; it never retrieves saved Wi-Fi passwords or disconnects devices.
 
 ## 🌐 Mega Scanner tools
 
