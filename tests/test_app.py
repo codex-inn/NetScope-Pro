@@ -94,3 +94,30 @@ def test_scan_rejects_unapproved_target_with_client_error():
     assert response.status_code == 400
     assert "Scanning is disabled" in response.json()["detail"]
 
+def test_mega_scanner_endpoints_require_login():
+    with TestClient(app) as client:
+        dns = client.post("/api/mega/dns", json={"target": "example.com"})
+        web_check = client.post("/api/mega/web-check", json={"target": "https://example.com"})
+        report = client.get("/api/mega/export/scans")
+    assert dns.status_code == 401
+    assert web_check.status_code == 401
+    assert report.status_code == 401
+
+
+def test_mega_scanner_rejects_non_object_json(monkeypatch):
+    from app.main import current_user
+
+    app.dependency_overrides[current_user] = lambda: {
+        "id": 1, "username": "test-admin", "role": "admin", "active": 1
+    }
+    try:
+        with TestClient(app) as client:
+            dns = client.post("/api/mega/dns", json=[])
+            web_check = client.post("/api/mega/web-check", json=[])
+        assert dns.status_code == 400
+        assert web_check.status_code == 400
+        assert dns.json()["detail"] == "Request body must be a JSON object."
+        assert web_check.json()["detail"] == "Request body must be a JSON object."
+    finally:
+        app.dependency_overrides.pop(current_user, None)
+
