@@ -56,3 +56,24 @@ def test_login_rate_limit_blocks_repeated_failures():
     assert blocked.status_code == 303
     assert "Too%20many%20login%20attempts" in blocked.headers["location"]
     _login_failures.clear()
+
+
+
+def test_scan_rejects_unapproved_target_with_client_error():
+    import time
+    from app.main import db
+    from app.security import hash_password
+
+    username = "testuser_" + str(time.time_ns())
+    password = "Test-only-password-123!"
+    with db() as con:
+        con.execute(
+            "INSERT INTO users(username,password_hash,role,created_at) VALUES(?,?,?,?)",
+            (username, hash_password(password), "admin", "2026-01-01T00:00:00+00:00"),
+        )
+    with TestClient(app) as client:
+        login = client.post("/api/login", data={"username": username, "password": password})
+        assert login.status_code == 303
+        response = client.post("/api/scans", json={"target": "192.0.2.1", "ports": [80]})
+    assert response.status_code == 400
+    assert "Scanning is disabled" in response.json()["detail"]
