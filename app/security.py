@@ -1,5 +1,5 @@
 from __future__ import annotations
-import hashlib, hmac, ipaddress, os, secrets
+import hashlib, hmac, html, ipaddress, os, secrets
 from typing import Iterable
 
 PBKDF2_ITERATIONS = 310_000
@@ -49,3 +49,8 @@ def validate_ports(ports: Iterable[int], max_ports: int = 25) -> list[int]:
     if len(values) > max_ports: raise ValueError(f'At most {max_ports} ports may be scanned per job.')
     if any(not isinstance(p, int) or p not in ALLOWED_PORTS for p in values): raise ValueError('One or more ports are outside the built-in allowed-port list.')
     return values
+
+
+def html_escape(value: object) -> str:
+    """Escape untrusted text before inserting it into an HTML text context."""
+    return html.escape(str(value), quote=True)
