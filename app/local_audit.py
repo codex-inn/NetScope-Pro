@@ -33,6 +33,36 @@ def validate_lan_scope(target: str, ports: list[int], authorized: bool) -> tuple
     return network, list(dict.fromkeys(ports))
 
 
+def detect_local_private_cidr() -> str:
+    """Detect the active Windows IPv4 subnet without reading Wi-Fi passwords."""
+    if platform.system() != "Windows":
+        raise ValueError("Automatic Wi-Fi subnet detection is currently supported on Windows. Enter your private CIDR manually on other systems.")
+    output = _run_readonly(["ipconfig", "/all"])
+    # Inspect adapter blocks separately so an unrelated VPN/virtual adapter is not
+    # accidentally combined with a different adapter's subnet mask.
+    blocks = re.split(r"\\r?\\n(?=[^\\r\\n].*:)", output)
+    candidates = []
+    for block in blocks:
+        ip_match = re.search(r"IPv4[^:\\n]*:\\s*([0-9]{1,3}(?:\\.[0-9]{1,3}){3})", block, flags=re.IGNORECASE)
+        mask_match = re.search(r"Subnet Mask[^:\\n]*:\\s*([0-9]{1,3}(?:\\.[0-9]{1,3}){3})", block, flags=re.IGNORECASE)
+        gateway_match = re.search(r"Default Gateway[^:\\n]*:\\s*([0-9]{1,3}(?:\\.[0-9]{1,3}){3})", block, flags=re.IGNORECASE)
+        if not ip_match or not mask_match:
+            continue
+        try:
+            address = ipaddress.IPv4Address(ip_match.group(1))
+            mask = ipaddress.IPv4Address(mask_match.group(1))
+            network = ipaddress.ip_network(f"{address}/{mask}", strict=False)
+        except ValueError:
+            continue
+        if address.is_private and not address.is_loopback and network.num_addresses <= LAN_MAX_HOSTS:
+            # Prefer the adapter that reports a default gateway, usually the active Wi-Fi/LAN.
+            candidates.append((bool(gateway_match and gateway_match.group(1).strip(" .0")), str(network)))
+    if not candidates:
+        raise ValueError("Could not detect a private IPv4 subnet with 256 or fewer addresses. Check your Wi-Fi connection or enter a private CIDR manually.")
+    candidates.sort(reverse=True)
+    return candidates[0][1]
+
+
 def discover_lan(target: str, ports: list[int], authorized: bool, *, connect=socket.create_connection) -> dict:
     """Bounded TCP connect discovery; reports only hosts that accept selected ports."""
     network, selected_ports = validate_lan_scope(target, ports, authorized)
