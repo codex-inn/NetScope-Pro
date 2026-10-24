@@ -56,16 +56,29 @@ def discover_lan(target: str, ports: list[int], authorized: bool, *, connect=soc
             if result:
                 ip, port_result = result
                 open_by_host.setdefault(ip, []).append(port_result)
-    hosts = [{"ip": ip, "open_ports": sorted(found, key=lambda item: item["port"])}
-             for ip, found in sorted(open_by_host.items(), key=lambda item: ipaddress.ip_address(item[0]))]
+    # Include every address in the bounded target range so the UI can distinguish
+    # responding hosts from addresses that did not answer the selected TCP ports.
+    hosts = []
+    for address in network:
+        ip = str(address)
+        found = sorted(open_by_host.get(ip, []), key=lambda item: item["port"])
+        hosts.append({
+            "ip": ip,
+            "hostname": None,
+            "status": "responding" if found else "no_response",
+            "response_time_ms": min((item["latency_ms"] for item in found), default=None),
+            "open_ports": found,
+        })
     return {
         "target": str(network), "ports": selected_ports, "hosts_checked": network.num_addresses,
-        "checks_completed": len(tasks), "hosts_found": len(hosts), "hosts": hosts,
+        "checks_completed": len(tasks), "hosts_found": len(open_by_host), "hosts": hosts,
+        "progress": {"completed": len(tasks), "total": len(tasks), "percent": 100},
         "duration_seconds": round(time.monotonic() - started, 2),
         "checked_at": datetime.now(timezone.utc).isoformat(timespec="seconds"),
         "method": "TCP connect only",
-        "limitations": ["A host appears only if it accepts a selected TCP connection; filtered hosts may not respond.",
-                        "No service exploitation, UDP probing, OS fingerprinting, or hostname lookup is performed."],
+        "limitations": ["A host is marked responding only if it accepts a selected TCP connection; filtered hosts may still exist.",
+                        "Hostname reverse lookup is not performed; hostname is null when not resolved.",
+                        "No service exploitation, UDP probing, or OS fingerprinting is performed."],
     }
 
 
