@@ -33,8 +33,41 @@ def validate_lan_scope(target: str, ports: list[int], authorized: bool) -> tuple
     return network, list(dict.fromkeys(ports))
 
 
+def detect_local_private_cidr() -> str:
+    """Detect the active Windows IPv4 subnet without reading Wi-Fi passwords."""
+    if platform.system() != "Windows":
+        raise ValueError("Automatic Wi-Fi subnet detection is currently supported on Windows. Enter your private CIDR manually on other systems.")
+    output = _run_readonly(["ipconfig", "/all"])
+    # Inspect adapter blocks separately so an unrelated VPN/virtual adapter is not
+    # accidentally combined with a different adapter's subnet mask.
+    blocks = re.split(r"(?m)(?=^[^\s\r\n].*:)", output)
+    candidates = []
+    for block in blocks:
+        ip_match = re.search(r"IPv4[^:\n]*:\s*([0-9]{1,3}(?:\.[0-9]{1,3}){3})", block, flags=re.IGNORECASE)
+        mask_match = re.search(r"Subnet Mask[^:\n]*:\s*([0-9]{1,3}(?:\.[0-9]{1,3}){3})", block, flags=re.IGNORECASE)
+        gateway_match = re.search(r"Default Gateway[^:\n]*:\s*([0-9]{1,3}(?:\.[0-9]{1,3}){3})", block, flags=re.IGNORECASE)
+        if not ip_match or not mask_match:
+            continue
+        try:
+            address = ipaddress.IPv4Address(ip_match.group(1))
+            mask = ipaddress.IPv4Address(mask_match.group(1))
+            network = ipaddress.ip_network(f"{address}/{mask}", strict=False)
+        except ValueError:
+            continue
+        if address.is_private and not address.is_loopback and network.num_addresses <= LAN_MAX_HOSTS:
+            # Prefer the adapter that reports a default gateway, usually the active Wi-Fi/LAN.
+            candidates.append((bool(gateway_match and gateway_match.group(1).strip(" .0")), str(network)))
+    if not candidates:
+        raise ValueError("Could not detect a private IPv4 subnet with 256 or fewer addresses. Check your Wi-Fi connection or enter a private CIDR manually.")
+    candidates.sort(reverse=True)
+    return candidates[0][1]
+
 def discover_lan(target: str, ports: list[int], authorized: bool, *, connect=socket.create_connection) -> dict:
     """Bounded TCP connect discovery; reports only hosts that accept selected ports."""
+    if isinstance(target, str) and target.strip().lower() == "auto":
+        target = detect_local_private_cidr()
+    if isinstance(target, str) and target.strip().lower() == "auto":
+        target = detect_local_private_cidr()
     network, selected_ports = validate_lan_scope(target, ports, authorized)
     started = time.monotonic()
     tasks = [(str(host), port) for host in network for port in selected_ports]
@@ -56,16 +89,29 @@ def discover_lan(target: str, ports: list[int], authorized: bool, *, connect=soc
             if result:
                 ip, port_result = result
                 open_by_host.setdefault(ip, []).append(port_result)
-    hosts = [{"ip": ip, "open_ports": sorted(found, key=lambda item: item["port"])}
-             for ip, found in sorted(open_by_host.items(), key=lambda item: ipaddress.ip_address(item[0]))]
+    # Include every address in the bounded target range so the UI can distinguish
+    # responding hosts from addresses that did not answer the selected TCP ports.
+    hosts = []
+    for address in network:
+        ip = str(address)
+        found = sorted(open_by_host.get(ip, []), key=lambda item: item["port"])
+        hosts.append({
+            "ip": ip,
+            "hostname": None,
+            "status": "responding" if found else "no_response",
+            "response_time_ms": min((item["latency_ms"] for item in found), default=None),
+            "open_ports": found,
+        })
     return {
         "target": str(network), "ports": selected_ports, "hosts_checked": network.num_addresses,
-        "checks_completed": len(tasks), "hosts_found": len(hosts), "hosts": hosts,
+        "checks_completed": len(tasks), "hosts_found": len(open_by_host), "hosts": hosts,
+        "progress": {"completed": len(tasks), "total": len(tasks), "percent": 100},
         "duration_seconds": round(time.monotonic() - started, 2),
         "checked_at": datetime.now(timezone.utc).isoformat(timespec="seconds"),
         "method": "TCP connect only",
-        "limitations": ["A host appears only if it accepts a selected TCP connection; filtered hosts may not respond.",
-                        "No service exploitation, UDP probing, OS fingerprinting, or hostname lookup is performed."],
+        "limitations": ["A host is marked responding only if it accepts a selected TCP connection; filtered hosts may still exist.",
+                        "Hostname reverse lookup is not performed; hostname is null when not resolved.",
+                        "No service exploitation, UDP probing, or OS fingerprinting is performed."],
     }
 
 
