@@ -65,6 +65,8 @@ def detect_local_private_cidr() -> str:
 
 def discover_lan(target: str, ports: list[int], authorized: bool, *, connect=socket.create_connection) -> dict:
     """Bounded TCP connect discovery; reports only hosts that accept selected ports."""
+    if isinstance(target, str) and target.strip().lower() == "auto":
+        target = detect_local_private_cidr()
     network, selected_ports = validate_lan_scope(target, ports, authorized)
     started = time.monotonic()
     tasks = [(str(host), port) for host in network for port in selected_ports]
