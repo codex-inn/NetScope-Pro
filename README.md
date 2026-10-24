@@ -10,6 +10,7 @@ NetScope Pro combines a browser-based URL/DNS workspace with an optional Cloudfl
 - Evidence-based findings with severity, meaning, impact, and remediation; observations are not asserted to be confirmed vulnerabilities.
 - Local browser history, comparison/change detection, JSON/CSV/PDF exports, and print reports.
 - Optional exact-host authorized Worker TCP checks on a small supported port list.
+- Optional private LAN discovery through the loopback Python API, using bounded TCP connection checks.
 
 ## Run browser app
 
@@ -26,6 +27,10 @@ The Python API performs the TLS socket handshake needed to observe the peer cert
 
 The API rejects hosts outside the exact allowlist before DNS resolution; resolves and pins to a validated public address; rejects private/reserved addresses and unsupported ports; verifies HTTPS using the system trust store; follows only bounded same-host HTTP(S) redirects; does not forward credentials/cookies; uses five-second network timeouts, bounded response reads, concurrency limits, and per-client rate limits. DNS lookups use Cloudflare DNS-over-HTTPS. Review `app/mega_scanner.py` and `app/main.py` for exact current bounds.
 
+## Authorized private LAN discovery
+
+Start the local Python API and sign in. Open **Private LAN Discovery** in its dashboard, or open `/workspace` to use the browser workspace Network Tools tab with the authenticated local API. The local API serves `/workspace` same-origin so the browser can securely use your session. This feature is only available through the loopback API (`127.0.0.1`); the static GitHub Pages UI does not scan private networks directly. Enter a private IPv4 address or CIDR, select supported TCP ports, and confirm that you own the network or have explicit authorization. Only RFC1918 private IPv4 ranges are accepted, with at most 256 addresses and eight fixed ports per request. The API uses TCP connect checks with a 350 ms per-connection timeout, at most 32 concurrent connections, and a limit of two scans per minute. A host is reported only when it accepts one of the selected connections. Filtered or non-responsive hosts may still exist. No UDP, OS fingerprinting, service exploitation, or hostname lookup is performed. Use the existing Nmap feature only for networks explicitly listed in `APPROVED_CIDRS`.
+
 ## Optional Cloudflare Worker
 
 The static GitHub Pages UI can use the optional Worker for its existing bounded TCP and HTTP checks. In `cloudflare-worker`, configure exact public hostnames in `ALLOWED_SCAN_TARGETS` and the Pages origin in `CORS_ORIGINS`, then deploy with Wrangler (`npx wrangler deploy`). Configure the site’s Worker base URL in **Main Network Scan**. The Worker does not expose certificate issuer, SAN, expiry, or chain metadata; use the local API for those fields. Worker deployment is independent from GitHub Pages.
@@ -38,7 +43,7 @@ The static GitHub Pages UI can use the optional Worker for its existing bounded 
 
 ## Limits and safe interpretation
 
-No traceroute, packet capture, broad port scan, or LAN discovery is simulated. Header presence is not proof that a control is effective, and missing headers are not automatically vulnerabilities. A certificate result reflects the local runtime trust store and does not check revocation. Redirects to other hosts are recorded and not followed. DKIM is checked only for the selector supplied, if any. DNS absence may reflect provider behavior, delegation, caching, or lookup failure.
+No traceroute, packet capture, or broad port scan is performed. The local LAN discovery feature is limited to explicitly authorized private IPv4 targets and selected TCP ports as documented above. Header presence is not proof that a control is effective, and missing headers are not automatically vulnerabilities. A certificate result reflects the local runtime trust store and does not check revocation. Redirects to other hosts are recorded and not followed. DKIM is checked only for the selector supplied, if any. DNS absence may reflect provider behavior, delegation, caching, or lookup failure.
 
 Never scan a third-party target without explicit authorization. The consent checkbox supplements, but does not replace, the exact configured allowlist. Do not configure TNAU or any other third-party target without its explicit authorization.
 

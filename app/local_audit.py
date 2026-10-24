@@ -1,7 +1,72 @@
 """Read-only local Wi-Fi and public-link diagnostics."""
 from __future__ import annotations
-import platform, re, socket, subprocess
+import concurrent.futures
+import ipaddress
+import platform, re, socket, subprocess, time, threading
 from datetime import datetime, timezone
+
+
+LAN_PORTS = (22, 53, 80, 443, 445, 3389, 8080, 8443)
+LAN_MAX_HOSTS = 256
+LAN_MAX_CONCURRENCY = 32
+LAN_CONNECT_TIMEOUT = 0.35
+RFC1918_NETWORKS = tuple(ipaddress.ip_network(value) for value in ("10.0.0.0/8", "172.16.0.0/12", "192.168.0.0/16"))
+_lan_connection_slots = threading.BoundedSemaphore(LAN_MAX_CONCURRENCY)
+
+
+def validate_lan_scope(target: str, ports: list[int], authorized: bool) -> tuple[ipaddress.IPv4Network, list[int]]:
+    """Validate explicit LAN discovery scope before any sockets are opened."""
+    if authorized is not True:
+        raise ValueError("Confirm that you own or are authorized to assess this private LAN.")
+    try:
+        network = ipaddress.ip_network(target.strip(), strict=False)
+    except (ValueError, AttributeError) as exc:
+        raise ValueError("Enter a valid private IPv4 address or CIDR.") from exc
+    if network.version != 4 or not any(network.subnet_of(allowed) for allowed in RFC1918_NETWORKS):
+        raise ValueError("Only RFC1918 private IPv4 addresses and networks are accepted.")
+    if network.num_addresses > LAN_MAX_HOSTS:
+        raise ValueError(f"Target contains {network.num_addresses} addresses; limit is {LAN_MAX_HOSTS}.")
+    if not isinstance(ports, list) or not ports or len(ports) > len(LAN_PORTS):
+        raise ValueError(f"Choose between 1 and {len(LAN_PORTS)} supported TCP ports.")
+    if any(type(port) is not int or port not in LAN_PORTS for port in ports):
+        raise ValueError("One or more ports are outside the supported LAN TCP port list.")
+    return network, list(dict.fromkeys(ports))
+
+
+def discover_lan(target: str, ports: list[int], authorized: bool, *, connect=socket.create_connection) -> dict:
+    """Bounded TCP connect discovery; reports only hosts that accept selected ports."""
+    network, selected_ports = validate_lan_scope(target, ports, authorized)
+    started = time.monotonic()
+    tasks = [(str(host), port) for host in network for port in selected_ports]
+    open_by_host: dict[str, list[dict]] = {}
+
+    def probe(ip: str, port: int):
+        began = time.monotonic()
+        _lan_connection_slots.acquire()
+        try:
+            with connect((ip, port), timeout=LAN_CONNECT_TIMEOUT):
+                return ip, {"port": port, "state": "open", "latency_ms": round((time.monotonic() - began) * 1000, 2)}
+        except (OSError, TimeoutError):
+            return None
+        finally:
+            _lan_connection_slots.release()
+
+    with concurrent.futures.ThreadPoolExecutor(max_workers=LAN_MAX_CONCURRENCY) as pool:
+        for result in pool.map(lambda item: probe(*item), tasks):
+            if result:
+                ip, port_result = result
+                open_by_host.setdefault(ip, []).append(port_result)
+    hosts = [{"ip": ip, "open_ports": sorted(found, key=lambda item: item["port"])}
+             for ip, found in sorted(open_by_host.items(), key=lambda item: ipaddress.ip_address(item[0]))]
+    return {
+        "target": str(network), "ports": selected_ports, "hosts_checked": network.num_addresses,
+        "checks_completed": len(tasks), "hosts_found": len(hosts), "hosts": hosts,
+        "duration_seconds": round(time.monotonic() - started, 2),
+        "checked_at": datetime.now(timezone.utc).isoformat(timespec="seconds"),
+        "method": "TCP connect only",
+        "limitations": ["A host appears only if it accepts a selected TCP connection; filtered hosts may not respond.",
+                        "No service exploitation, UDP probing, OS fingerprinting, or hostname lookup is performed."],
+    }
 
 
 def _run_readonly(command: list[str], timeout: int = 5) -> str:
