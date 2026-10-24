@@ -40,7 +40,7 @@ def detect_local_private_cidr() -> str:
     output = _run_readonly(["ipconfig", "/all"])
     # Inspect adapter blocks separately so an unrelated VPN/virtual adapter is not
     # accidentally combined with a different adapter's subnet mask.
-    blocks = re.split(r"\r?\n(?=[^\r\n].*:)", output)
+    blocks = re.split(r"(?m)(?=^[^\s\r\n].*:)", output)
     candidates = []
     for block in blocks:
         ip_match = re.search(r"IPv4[^:\n]*:\s*([0-9]{1,3}(?:\.[0-9]{1,3}){3})", block, flags=re.IGNORECASE)
