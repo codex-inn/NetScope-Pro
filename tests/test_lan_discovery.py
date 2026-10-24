@@ -34,7 +34,12 @@ def test_discovery_only_reports_successful_tcp_connects():
     assert result["hosts_checked"] == 4
     assert result["checks_completed"] == 8
     assert result["hosts_found"] == 1
-    assert result["hosts"] == [{"ip": "192.168.1.1", "open_ports": [{"port": 80, "state": "open", "latency_ms": pytest.approx(0, abs=50)}]}]
+    assert result["hosts"] == [
+        {"ip": "192.168.1.0", "hostname": None, "status": "no_response", "response_time_ms": None, "open_ports": []},
+        {"ip": "192.168.1.1", "hostname": None, "status": "responding", "response_time_ms": pytest.approx(0, abs=50), "open_ports": [{"port": 80, "state": "open", "latency_ms": pytest.approx(0, abs=50)}]},
+        {"ip": "192.168.1.2", "hostname": None, "status": "no_response", "response_time_ms": None, "open_ports": []},
+        {"ip": "192.168.1.3", "hostname": None, "status": "no_response", "response_time_ms": None, "open_ports": []},
+    ]
     assert all(timeout == 0.35 for _, timeout in calls)
 
 
