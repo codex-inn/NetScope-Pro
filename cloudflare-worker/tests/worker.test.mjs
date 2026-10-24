@@ -172,7 +172,7 @@ test("authorized website inspection reports headers and cookie flags", async () 
     assert.equal(report.checks.find(x => x.id === "content_type").passed, true);
     assert.equal(report.cookie_summary[0].secure, true);
     assert.equal(report.cookie_summary[0].http_only, true);
-    assert.equal(calls.length, 2);
+    assert.equal(calls.length, 4);
   } finally { globalThis.fetch = originalFetch; }
 });
 
@@ -182,7 +182,10 @@ test("authorized website inspection never follows a redirect to another hostname
   globalThis.fetch = async input => {
     const url = new URL(input);
     visited.push(url.href);
-    if (url.hostname === "cloudflare-dns.com") return new Response(JSON.stringify({ Status: 0, Answer: [{ type: 1, data: "93.184.216.34" }] }));
+    if (url.hostname === "cloudflare-dns.com") {
+      const type = url.searchParams.get("type");
+      return new Response(JSON.stringify({ Status: 0, Answer: type === "A" ? [{ type: 1, data: "93.184.216.34" }] : [] }));
+    }
     return new Response(null, { status: 302, headers: { location: "https://other.example/login" } });
   };
   try {
@@ -193,3 +196,60 @@ test("authorized website inspection never follows a redirect to another hostname
     assert.equal(visited.filter(url => new URL(url).hostname === "other.example").length, 0);
   } finally { globalThis.fetch = originalFetch; }
 });
+
+
+test("rejects an allowlisted domain with a non-public IPv6 DNS answer", async () => {
+  const originalFetch = globalThis.fetch;
+  globalThis.fetch = async input => {
+    const url = new URL(input);
+    if (url.hostname !== "cloudflare-dns.com") throw new Error("Website fetch must not occur.");
+    const type = url.searchParams.get("type");
+    const answer = type === "A" ? [{ type: 1, data: "93.184.216.34" }] : [{ type: 28, data: "2001:db8::5" }];
+    return new Response(JSON.stringify({ Status: 0, Answer: answer }));
+  };
+  try {
+    const response = await worker.fetch(request("/inspect", {
+      method: "POST",
+      body: JSON.stringify({ target: "example.com", authorized: true })
+    }), { ALLOWED_SCAN_TARGETS: "example.com" });
+    assert.equal(response.status, 502);
+    assert.match((await response.json()).detail, /non-public IP/);
+  } finally { globalThis.fetch = originalFetch; }
+});
+
+test("caps inspection request bodies before parsing", async () => {
+  const response = await worker.fetch(request("/inspect", {
+    method: "POST",
+    body: JSON.stringify({ target: "example.com", authorized: true, notes: "x".repeat(5000) })
+  }), { ALLOWED_SCAN_TARGETS: "example.com" });
+  assert.equal(response.status, 413);
+  assert.match((await response.json()).detail, /too large/);
+});
+
+test("inspection report includes evidence-based findings and honest TLS limitations", async () => {
+  const originalFetch = globalThis.fetch;
+  let pageCalls = 0;
+  globalThis.fetch = async input => {
+    const url = new URL(input);
+    if (url.hostname === "cloudflare-dns.com") {
+      const type = url.searchParams.get("type");
+      return new Response(JSON.stringify({ Status: 0, Answer: type === "A" ? [{ type: 1, data: "93.184.216.34" }] : [] }));
+    }
+    pageCalls++;
+    if (url.protocol === "http:") return new Response(null, { status: 301, headers: { location: "https://example.com/" } });
+    return new Response(null, { status: 200, headers: { "content-security-policy": "default-src 'self'", "set-cookie": "sid=private; Secure; HttpOnly; SameSite=Lax" } });
+  };
+  try {
+    const response = await worker.fetch(request("/inspect", {
+      method: "POST", body: JSON.stringify({ target: "example.com", authorized: true })
+    }), { ALLOWED_SCAN_TARGETS: "example.com" });
+    const report = await response.json();
+    assert.equal(response.status, 200);
+    assert.equal(report.http_probe.redirects_to_https, true);
+    assert.equal(report.tls.certificate_details_available, false);
+    assert.ok(report.findings.some(f => f.title === "Strict-Transport-Security not observed" && f.severity === "medium"));
+    assert.ok(report.findings.every(f => f.confirmed_vulnerability === false));
+    assert.equal(pageCalls, 2);
+  } finally { globalThis.fetch = originalFetch; }
+});
+

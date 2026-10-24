@@ -1,9 +1,10 @@
 import os
-import tempfile
 from pathlib import Path
 
 # Keep test database outside the repository and avoid creating a bootstrap account.
-os.environ["DATABASE_PATH"] = str(Path(tempfile.mkdtemp(prefix="netscope-test-")) / "test.db")
+test_data = Path(__file__).resolve().parents[1] / "data"
+test_data.mkdir(exist_ok=True)
+os.environ["DATABASE_PATH"] = str(test_data / "test.db")
 os.environ["APP_SECRET_KEY"] = "test-only-secret-key-that-is-long-enough-123"
 os.environ["APPROVED_CIDRS"] = ""
 os.environ["BOOTSTRAP_ADMIN_PASSWORD"] = ""
@@ -154,6 +155,7 @@ def test_mega_web_check_endpoint_returns_bounded_check(monkeypatch):
         "https": {"status_code": 200, "reachable": True},
         "http": {"status_code": 301, "reachable": True},
         "notes": ["redirects were not followed"],
+        "findings": [],
     }
     monkeypatch.setattr(main_module, "web_check", lambda target: expected)
     app.dependency_overrides[current_user] = lambda: {
@@ -161,7 +163,7 @@ def test_mega_web_check_endpoint_returns_bounded_check(monkeypatch):
     }
     try:
         with TestClient(app) as client:
-            response = client.post("/api/mega/web-check", json={"target": "https://example.com"})
+            response = client.post("/api/mega/web-check", json={"target": "https://example.com", "authorized": True})
         assert response.status_code == 200
         assert response.json() == expected
     finally:
@@ -202,4 +204,46 @@ def test_static_scan_ui_explains_missing_worker_allowlist():
     assert "configured_targets: 0" in html
     assert "ALLOWED_SCAN_TARGETS" in html
     assert "Check API connection" in html
+
+
+
+def test_mega_web_check_requires_explicit_authorization(monkeypatch):
+    from app.main import current_user
+    import app.main as main_module
+
+    monkeypatch.setattr(main_module, "web_check", lambda *_args, **_kwargs: (_ for _ in ()).throw(AssertionError("must not inspect")))
+    app.dependency_overrides[current_user] = lambda: {
+        "id": 1, "username": "test-admin", "role": "admin", "active": 1
+    }
+    try:
+        with TestClient(app) as client:
+            response = client.post("/api/mega/web-check", json={"target": "example.com"})
+        assert response.status_code == 400
+        assert "Confirm authorization" in response.json()["detail"]
+    finally:
+        app.dependency_overrides.pop(current_user, None)
+
+
+def test_mega_web_check_rejects_oversized_request(monkeypatch):
+    from app.main import current_user
+    app.dependency_overrides[current_user] = lambda: {
+        "id": 1, "username": "test-admin", "role": "admin", "active": 1
+    }
+    try:
+        with TestClient(app) as client:
+            response = client.post("/api/mega/web-check", content=" " * 5000, headers={"Content-Type": "application/json"})
+        assert response.status_code == 413
+    finally:
+        app.dependency_overrides.pop(current_user, None)
+
+
+def test_web_check_rate_limit_is_bounded_per_user(monkeypatch):
+    from app.main import web_check_is_limited
+    import app.main as main_module
+
+    monkeypatch.setattr(main_module, "_web_check_requests", {})
+    for i in range(main_module.WEB_CHECK_MAX_REQUESTS):
+        assert web_check_is_limited("operator", current_time=float(i)) is False
+    assert web_check_is_limited("operator", current_time=10.0) is True
+    assert web_check_is_limited("other", current_time=10.0) is False
 

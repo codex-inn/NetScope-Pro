@@ -1,63 +1,44 @@
-# NetScope Pro Web
+# NetScope Pro
 
-**A browser-first web security workspace. No executable download is required.**
-
-Public website: https://codex-inn.github.io/NetScope-Pro/
-
-NetScope Pro Web is designed to run from a normal browser. It provides a responsive dashboard for URL structure analysis, public DNS-over-HTTPS lookups, caution indicators, local browser history, and printable/copyable reports.
+NetScope Pro combines a browser-based URL/DNS workspace with an optional Cloudflare Worker for bounded HTTP inspection and TCP reachability checks, and an optional local Python API for certificate inspection. Browser history is stored in local storage; the project adds no database for the web assessment features.
 
 ## Features
 
-- Responsive dashboard with Overview, Link Analyzer, DNS Inspector, Analysis History, Main Network Scan, and Network Tools
-- URL parsing and visible indicators for HTTP vs HTTPS, punycode, embedded user information, explicit ports, IP literals, and known shortener domains
-- Public DNS lookups using Cloudflare DNS-over-HTTPS for A, AAAA, MX, NS, TXT, and CAA records
-- Clear per-check labels: Verified, Unverified, Suspicious, and Failed
-- Recent analysis history stored in the browser's local storage
-- Copyable findings and Print / Save PDF reports
-- Optional hosted API integration for bounded TCP checks on service-owner-allowlisted public targets
-- No login, executable, extension, or local installation needed for the website
+- URL structure analysis and public DNS-over-HTTPS queries for A, AAAA, MX, NS, TXT, and CAA.
+- DNS mail and certificate-authority policy review for SPF, DMARC, CAA, and an optional supplied DKIM selector.
+- Website checks for HTTPS/TLS trust and certificate metadata, HTTP security headers, cookie flags, and same-host redirect chains in the local Python API. The Cloudflare Worker provides bounded header/redirect checks; its runtime does not expose peer-certificate chain details.
+- Evidence-based findings with severity, meaning, impact, and remediation; observations are not asserted to be confirmed vulnerabilities.
+- Local browser history, comparison/change detection, JSON/CSV/PDF exports, and print reports.
+- Optional exact-host authorized Worker TCP checks on a small supported port list.
 
-## Open the website
+## Run browser app
 
-1. Visit https://codex-inn.github.io/NetScope-Pro/
-2. Enter a URL in **Quick analysis** and select **Analyze link**.
-3. Review each check separately; use **DNS Inspector** to inspect public DNS records.
-4. Copy findings or choose **Print / Save PDF** to save a report.
+Open `index.html` or serve the project directory using any static HTTP server. No build step is required. Use **DNS Inspector** and **Link Analyzer** for browser-only functions. Browser DNS queries go to Cloudflare DNS-over-HTTPS, which can see queried names.
 
-## Important browser-only limits
+## Local API website assessment (full certificate metadata)
 
-A public static website cannot access the computer's Wi-Fi SSID/password, inspect nearby devices, scan private LAN ports, or reliably inspect arbitrary websites' TLS certificates and response headers. Those operations require a separately deployed backend or local agent, which is intentionally outside this web-only edition.
+The Python API performs the TLS socket handshake needed to observe the peer certificate. Use it only on hosts you own or have written authorization to assess.
 
-This analyzer does not fetch arbitrary website pages or follow redirects. DNS records and URL patterns are indicators only—not proof that a website is safe or malicious. A site can be harmful even if every visible check passes. Avoid entering URLs containing session tokens, passwords, or private identifiers. DNS queries send the queried hostname to Cloudflare's public DNS-over-HTTPS service.
+1. Use Python 3.11 or later; install project dependencies with `pip install -r requirements.txt`.
+2. Copy `.env.example` to `.env`, set unique local credentials/secrets, and set `AUTHORIZED_WEB_HOSTS` to exact authorized hostnames, comma-separated. Leave empty to disable website assessments. Do not include wildcard domains or targets you do not control.
+3. Start the local API using the project's documented app entry point (from the repository root): `uvicorn app.main:app --host 127.0.0.1 --port 8765`. Keep it bound to loopback.
+4. Open the local dashboard served by the API, navigate to **Website security assessment**, enter an exact configured host, and tick the explicit authorization confirmation. Optionally provide the active DKIM selector.
 
-## Development
+The API rejects hosts outside the exact allowlist before DNS resolution; resolves and pins to a validated public address; rejects private/reserved addresses and unsupported ports; verifies HTTPS using the system trust store; follows only bounded same-host HTTP(S) redirects; does not forward credentials/cookies; uses five-second network timeouts, bounded response reads, concurrency limits, and per-client rate limits. DNS lookups use Cloudflare DNS-over-HTTPS. Review `app/mega_scanner.py` and `app/main.py` for exact current bounds.
 
-The site is a static HTML/CSS/JavaScript app in `index.html`. No build step or package installation is needed. For local preview, open `index.html` in a modern browser or use any static web server.
+## Optional Cloudflare Worker
 
-Only assess URLs and systems you are authorized to inspect.
+The static GitHub Pages UI can use the optional Worker for its existing bounded TCP and HTTP checks. In `cloudflare-worker`, configure exact public hostnames in `ALLOWED_SCAN_TARGETS` and the Pages origin in `CORS_ORIGINS`, then deploy with Wrangler (`npx wrangler deploy`). Configure the site’s Worker base URL in **Main Network Scan**. The Worker does not expose certificate issuer, SAN, expiry, or chain metadata; use the local API for those fields. Worker deployment is independent from GitHub Pages.
 
-## Main Network Scan (Cloudflare Workers; no Render required)
+## Tests
 
-The website is static, so GitHub Pages itself cannot open arbitrary TCP connections or discover devices on your Wi-Fi. The **Main Network Scan** screen calls an optional Cloudflare Worker API; without that API deployed and configured, it reports that scanning is unavailable rather than inventing results. This setup does not use Render and does not require an EXE.
+- Python: `pytest -q` (the web-check suite uses mocked DNS/socket responses; no third-party host is contacted).
+- Worker/PDF export: `node --test cloudflare-worker/tests/*.test.mjs` (uses mocked DNS and network operations).
+- Static JS: `node --check cloudflare-worker/src/index.js`; the `index.html` app is inline JavaScript and should be checked in a browser after edits.
 
-### Deploy the optional Cloudflare Worker API
+## Limits and safe interpretation
 
-1. Create/sign in to a Cloudflare account and open **Workers & Pages**.
-2. Create a Worker named `netscope-pro-scan-api`.
-3. In the Worker editor, copy the code from `cloudflare-worker/src/index.js` into the Worker and deploy it. Alternatively, use Wrangler from a development environment with the project files:
-   ```bash
-   cd cloudflare-worker
-   npx wrangler deploy
-   ```
-4. In the Worker settings, add the variable `ALLOWED_SCAN_TARGETS` with a comma-separated list of exact public hostnames or individual public IPv4 addresses that you own or are explicitly authorized to assess. Example: `your-domain.example`. Do not add private LAN addresses. Leave it unset until ready to configure an authorized target.
-5. Add `CORS_ORIGINS` as a variable with value `https://codex-inn.github.io`. If you use a custom GitHub Pages domain, add that exact origin too.
-6. Open the deployed Worker URL, then open NetScope Pro → **Main Network Scan**. Enter the Worker base URL (for example, `https://netscope-pro-scan-api.<your-subdomain>.workers.dev`), click **Check API connection**, then enter the allowlisted target, select ports, and confirm authorization.
-7. If Cloudflare disables or limits outbound TCP sockets for your account or plan, the real TCP scan feature will not work on that account. The website will show the API error rather than fabricate results.
+No traceroute, packet capture, broad port scan, or LAN discovery is simulated. Header presence is not proof that a control is effective, and missing headers are not automatically vulnerabilities. A certificate result reflects the local runtime trust store and does not check revocation. Redirects to other hosts are recorded and not followed. DKIM is checked only for the selector supplied, if any. DNS absence may reflect provider behavior, delegation, caching, or lookup failure.
 
-### Scope and safeguards
+Never scan a third-party target without explicit authorization. The consent checkbox supplements, but does not replace, the exact configured allowlist. Do not configure TNAU or any other third-party target without its explicit authorization.
 
-- Only individually allowlisted targets are accepted. The API rejects private, loopback, link-local, reserved, and non-public resolved addresses.
-- The scan is limited to a small fixed TCP port list, a small number of checks per request, short connection timeouts, and a basic per-client rate limit.
-- Results are TCP reachability observations only. A port marked closed/filtered is inconclusive and does not identify a vulnerability.
-- This cannot scan the user's local Wi-Fi or discover private-LAN devices. That would require a separately installed local component, which this project intentionally does not provide.
-- A hosted service has its own operating costs and network restrictions. Configure and use it only for systems you are authorized to test.
