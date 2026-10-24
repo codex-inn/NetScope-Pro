@@ -157,7 +157,7 @@ def test_mega_web_check_endpoint_returns_bounded_check(monkeypatch):
         "notes": ["redirects were not followed"],
         "findings": [],
     }
-    monkeypatch.setattr(main_module, "web_check", lambda target: expected)
+    monkeypatch.setattr(main_module, "web_check", lambda target, **_kwargs: expected)
     app.dependency_overrides[current_user] = lambda: {
         "id": 1, "username": "test-admin", "role": "admin", "active": 1
     }
@@ -183,7 +183,7 @@ def test_mega_scanner_returns_retryable_error_when_worker_slots_are_full(monkeyp
     try:
         with TestClient(app) as client:
             dns = client.post("/api/mega/dns", json={"target": "example.com"})
-            website = client.post("/api/mega/web-check", json={"target": "https://example.com"})
+            website = client.post("/api/mega/web-check", json={"target": "https://example.com", "authorized": True})
         assert dns.status_code == 503
         assert website.status_code == 503
         assert dns.headers["retry-after"] == "3"
