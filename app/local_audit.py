@@ -40,12 +40,12 @@ def detect_local_private_cidr() -> str:
     output = _run_readonly(["ipconfig", "/all"])
     # Inspect adapter blocks separately so an unrelated VPN/virtual adapter is not
     # accidentally combined with a different adapter's subnet mask.
-    blocks = re.split(r"\\r?\\n(?=[^\\r\\n].*:)", output)
+    blocks = re.split(r"\r?\n(?=[^\r\n].*:)", output)
     candidates = []
     for block in blocks:
-        ip_match = re.search(r"IPv4[^:\\n]*:\\s*([0-9]{1,3}(?:\\.[0-9]{1,3}){3})", block, flags=re.IGNORECASE)
-        mask_match = re.search(r"Subnet Mask[^:\\n]*:\\s*([0-9]{1,3}(?:\\.[0-9]{1,3}){3})", block, flags=re.IGNORECASE)
-        gateway_match = re.search(r"Default Gateway[^:\\n]*:\\s*([0-9]{1,3}(?:\\.[0-9]{1,3}){3})", block, flags=re.IGNORECASE)
+        ip_match = re.search(r"IPv4[^:\n]*:\s*([0-9]{1,3}(?:\.[0-9]{1,3}){3})", block, flags=re.IGNORECASE)
+        mask_match = re.search(r"Subnet Mask[^:\n]*:\s*([0-9]{1,3}(?:\.[0-9]{1,3}){3})", block, flags=re.IGNORECASE)
+        gateway_match = re.search(r"Default Gateway[^:\n]*:\s*([0-9]{1,3}(?:\.[0-9]{1,3}){3})", block, flags=re.IGNORECASE)
         if not ip_match or not mask_match:
             continue
         try:
@@ -62,9 +62,10 @@ def detect_local_private_cidr() -> str:
     candidates.sort(reverse=True)
     return candidates[0][1]
 
-
 def discover_lan(target: str, ports: list[int], authorized: bool, *, connect=socket.create_connection) -> dict:
     """Bounded TCP connect discovery; reports only hosts that accept selected ports."""
+    if isinstance(target, str) and target.strip().lower() == "auto":
+        target = detect_local_private_cidr()
     if isinstance(target, str) and target.strip().lower() == "auto":
         target = detect_local_private_cidr()
     network, selected_ports = validate_lan_scope(target, ports, authorized)
