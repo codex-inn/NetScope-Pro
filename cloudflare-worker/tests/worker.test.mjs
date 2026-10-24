@@ -102,3 +102,94 @@ test("rejects unsupported ports before any network operation", async () => {
   assert.equal(response.status, 400);
   assert.match((await response.json()).detail, /supported list/);
 });
+
+test("blocks private addresses even when mistakenly placed on the allowlist", async () => {
+  const response = await worker.fetch(request("/scan", {
+    method: "POST",
+    body: JSON.stringify({ target: "10.0.0.8", ports: [443], authorized: true })
+  }), { ALLOWED_SCAN_TARGETS: "10.0.0.8" });
+  assert.equal(response.status, 400);
+  assert.match((await response.json()).detail, /non-public IP/);
+});
+
+test("blocks documentation-only public-looking address ranges", async () => {
+  const response = await worker.fetch(request("/scan", {
+    method: "POST",
+    body: JSON.stringify({ target: "198.51.100.7", ports: [443], authorized: true })
+  }), { ALLOWED_SCAN_TARGETS: "198.51.100.7" });
+  assert.equal(response.status, 400);
+  assert.match((await response.json()).detail, /non-public IP/);
+});
+
+test("rejects more than eight requested ports before resolving a target", async () => {
+  const response = await worker.fetch(request("/scan", {
+    method: "POST",
+    body: JSON.stringify({ target: "example.com", ports: [22, 53, 80, 443, 445, 3389, 8080, 8443, 80], authorized: true })
+  }), { ALLOWED_SCAN_TARGETS: "example.com" });
+  assert.equal(response.status, 400);
+  assert.match((await response.json()).detail, /1–8 unique ports/);
+});
+
+test("website inspection requires explicit authorization", async () => {
+  const response = await worker.fetch(request("/inspect", {
+    method: "POST",
+    body: JSON.stringify({ target: "example.com", authorized: false })
+  }), { ALLOWED_SCAN_TARGETS: "example.com" });
+  assert.equal(response.status, 400);
+  assert.match((await response.json()).detail, /authorized/);
+});
+
+test("website inspection remains restricted to the exact service allowlist", async () => {
+  const response = await worker.fetch(request("/inspect", {
+    method: "POST",
+    body: JSON.stringify({ target: "example.com", authorized: true })
+  }), { ALLOWED_SCAN_TARGETS: "my-owned-host.example" });
+  assert.equal(response.status, 403);
+  assert.match((await response.json()).detail, /not on the service owner's/);
+});
+
+test("authorized website inspection reports headers and cookie flags", async () => {
+  const originalFetch = globalThis.fetch;
+  const calls = [];
+  globalThis.fetch = async input => {
+    const url = new URL(input);
+    calls.push(url.href);
+    if (url.hostname === "cloudflare-dns.com") return new Response(JSON.stringify({ Status: 0, Answer: [{ type: 1, data: "93.184.216.34" }] }), { headers: { "content-type": "application/json" } });
+    return new Response("ok", { status: 200, headers: {
+      "strict-transport-security": "max-age=31536000",
+      "content-security-policy": "default-src 'self'; frame-ancestors 'none'",
+      "x-content-type-options": "nosniff",
+      "referrer-policy": "strict-origin-when-cross-origin",
+      "set-cookie": "sid=value; Secure; HttpOnly; SameSite=Lax"
+    } });
+  };
+  try {
+    const response = await worker.fetch(request("/inspect", { method: "POST", body: JSON.stringify({ target: "example.com", authorized: true }) }), { ALLOWED_SCAN_TARGETS: "example.com" });
+    assert.equal(response.status, 200);
+    const report = await response.json();
+    assert.equal(report.target, "example.com");
+    assert.equal(report.checks.find(x => x.id === "hsts").passed, true);
+    assert.equal(report.checks.find(x => x.id === "content_type").passed, true);
+    assert.equal(report.cookie_summary[0].secure, true);
+    assert.equal(report.cookie_summary[0].http_only, true);
+    assert.equal(calls.length, 2);
+  } finally { globalThis.fetch = originalFetch; }
+});
+
+test("authorized website inspection never follows a redirect to another hostname", async () => {
+  const originalFetch = globalThis.fetch;
+  const visited = [];
+  globalThis.fetch = async input => {
+    const url = new URL(input);
+    visited.push(url.href);
+    if (url.hostname === "cloudflare-dns.com") return new Response(JSON.stringify({ Status: 0, Answer: [{ type: 1, data: "93.184.216.34" }] }));
+    return new Response(null, { status: 302, headers: { location: "https://other.example/login" } });
+  };
+  try {
+    const response = await worker.fetch(request("/inspect", { method: "POST", body: JSON.stringify({ target: "example.com", authorized: true }) }), { ALLOWED_SCAN_TARGETS: "example.com" });
+    const report = await response.json();
+    assert.equal(response.status, 200);
+    assert.equal(report.external_redirect, "https://other.example/login");
+    assert.equal(visited.filter(url => new URL(url).hostname === "other.example").length, 0);
+  } finally { globalThis.fetch = originalFetch; }
+});

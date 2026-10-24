@@ -29,7 +29,7 @@ function isPublicIPv4(value) {
   if (a === 169 && b === 254) return false;
   if (a === 172 && b >= 16 && b <= 31) return false;
   if (a === 192 && (b === 0 || b === 168)) return false;
-  if (a === 198 && (b === 18 || b === 19 || b === 51)) return false;
+  if (a === 198 && (b === 18 || b === 19 || (b === 51 && c === 100))) return false;
   if (a === 203 && b === 0 && c === 113) return false;
   return true;
 }
@@ -53,9 +53,17 @@ async function resolvePublicIPv4(host) {
     return [host];
   }
   const url = "https://cloudflare-dns.com/dns-query?name=" + encodeURIComponent(host) + "&type=A";
-  const response = await fetch(url, { headers: { accept: "application/dns-json" } });
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), 5000);
+  let response;
+  try { response = await fetch(url, { headers: { accept: "application/dns-json" }, signal: controller.signal }); }
+  catch (error) {
+    if (error.name === "AbortError") throw new Error("Public DNS lookup timed out.");
+    throw new Error("Public DNS lookup failed.");
+  } finally { clearTimeout(timer); }
   if (!response.ok) throw new Error("Public DNS lookup failed (HTTP " + response.status + ").");
   const data = await response.json();
+  if (!data || !Number.isInteger(data.Status)) throw new Error("Public DNS returned an invalid response.");
   const answers = (data.Answer || []).filter(a => a.type === 1).map(a => a.data);
   if (!answers.length) throw new Error("No public IPv4 address was returned for this target.");
   if (answers.some(ip => !isPublicIPv4(ip))) throw new Error("Target resolves to a private or non-public IP and was blocked.");
@@ -63,19 +71,66 @@ async function resolvePublicIPv4(host) {
 }
 async function probe(address, port) {
   const started = Date.now();
-  let socket;
+  let socket, timer;
   try {
     socket = connect({ hostname: address, port }, { secureTransport: "off" });
     await Promise.race([
       socket.opened,
-      new Promise((_, reject) => setTimeout(() => reject(new Error("timeout")), 1800))
+      new Promise((_, reject) => { timer = setTimeout(() => reject(new Error("timeout")), 1800); })
     ]);
+    clearTimeout(timer);
     try { await socket.close(); } catch {}
     return { address, port, service: PORTS[port], state: "open", latency_ms: Date.now() - started };
   } catch {
+    clearTimeout(timer);
     try { if (socket) await socket.close(); } catch {}
     return { address, port, service: PORTS[port], state: "closed_or_filtered", latency_ms: Date.now() - started };
   }
+}
+async function probeBounded(jobs, concurrency = 4) {
+  const results = new Array(jobs.length);
+  let cursor = 0;
+  await Promise.all(Array.from({ length: Math.min(concurrency, jobs.length) }, async () => {
+    while (cursor < jobs.length) {
+      const index = cursor++;
+      results[index] = await probe(jobs[index].address, jobs[index].port);
+    }
+  }));
+  return results;
+}
+async function inspectWebsite(target) {
+  const started = Date.now(), redirects = [];
+  let current = new URL("https://" + target + "/"), response;
+  for (let hop = 0; hop <= 4; hop++) {
+    const controller = new AbortController(), timer = setTimeout(() => controller.abort(), 7000);
+    try { response = await fetch(current, { redirect: "manual", signal: controller.signal, headers: { "user-agent": "NetScope-Pro-Authorized-Inspector/1.0" } }); }
+    catch (error) { if (error.name === "AbortError") throw new Error("Website request timed out after 7 seconds."); throw new Error("Website could not be reached over HTTPS."); }
+    finally { clearTimeout(timer); }
+    if (![301, 302, 303, 307, 308].includes(response.status)) break;
+    const location = response.headers.get("location");
+    if (!location) break;
+    if (hop === 4) throw new Error("Redirect limit reached.");
+    const next = new URL(location, current);
+    redirects.push({ status: response.status, url: current.href, location: next.href });
+    if (!["https:", "http:"].includes(next.protocol) || next.hostname.toLowerCase() !== target) {
+      return { target, checked_at: new Date().toISOString(), status: response.status, latency_ms: Date.now() - started, final_url: current.href, redirects, external_redirect: next.href, checks: [], cookie_summary: [], limitations: ["Redirect targets outside the exact authorized hostname are not followed.", "TLS certificate expiry and chain details are not exposed by the Worker Fetch API."] };
+    }
+    current = next;
+  }
+  const headers = response.headers, has = name => Boolean(headers.get(name));
+  const csp = headers.get("content-security-policy") || "";
+  const checks = [
+    { id: "https", title: "HTTPS response", passed: current.protocol === "https:", evidence: current.protocol + " · HTTP " + response.status, fix: "Serve the site over HTTPS and redirect HTTP to HTTPS." },
+    { id: "hsts", title: "Strict-Transport-Security", passed: has("strict-transport-security"), evidence: headers.get("strict-transport-security") || "Header not present", fix: "Add HSTS after HTTPS is verified for the intended hostnames." },
+    { id: "csp", title: "Content-Security-Policy", passed: has("content-security-policy"), evidence: csp || "Header not present", fix: "Define a Content Security Policy for the site's resources." },
+    { id: "frame", title: "Clickjacking protection", passed: has("x-frame-options") || /frame-ancestors/i.test(csp), evidence: headers.get("x-frame-options") || (csp ? "Review CSP frame-ancestors." : "No frame protection observed"), fix: "Set CSP frame-ancestors or X-Frame-Options to the intended policy." },
+    { id: "content_type", title: "X-Content-Type-Options", passed: (headers.get("x-content-type-options") || "").toLowerCase() === "nosniff", evidence: headers.get("x-content-type-options") || "Header not present", fix: "Set X-Content-Type-Options: nosniff." },
+    { id: "referrer", title: "Referrer-Policy", passed: has("referrer-policy"), evidence: headers.get("referrer-policy") || "Header not present", fix: "Set a privacy-conscious Referrer-Policy." },
+    { id: "permissions", title: "Permissions-Policy", passed: has("permissions-policy"), evidence: headers.get("permissions-policy") || "Header not present", fix: "Disable browser capabilities the site does not use." }
+  ];
+  const cookies = typeof headers.getSetCookie === "function" ? headers.getSetCookie() : (headers.get("set-cookie") || "").split(/,(?=\s*[^;,]+=)/);
+  const cookie_summary = cookies.filter(Boolean).map((cookie, index) => ({ index: index + 1, secure: /(?:^|;)\s*secure(?:;|$)/i.test(cookie), http_only: /(?:^|;)\s*httponly(?:;|$)/i.test(cookie), same_site: (cookie.match(/(?:^|;)\s*samesite=([^;]*)/i) || [])[1] || null }));
+  return { target, checked_at: new Date().toISOString(), status: response.status, latency_ms: Date.now() - started, final_url: current.href, redirects, checks, cookie_summary, limitations: ["Bounded unauthenticated request; signed-in pages may differ.", "TLS certificate expiry and chain details are not exposed by the Worker Fetch API.", "Cookie analysis reports flags only, never cookie values."] };
 }
 function rateLimit(key) {
   const now = Date.now();
@@ -105,7 +160,7 @@ export default {
       const configured = (env.ALLOWED_SCAN_TARGETS || "").split(",").map(v => v.trim()).filter(Boolean);
       return json({ status: "ok", scan_mode: "allowlisted-public-targets", configured_targets: configured.length }, 200, corsOrigin);
     }
-    if (url.pathname !== "/scan" || request.method !== "POST") {
+    if (!["/scan", "/inspect"].includes(url.pathname) || request.method !== "POST") {
       return json({ detail: "Not found." }, 404, corsOrigin);
     }
     let body;
@@ -116,17 +171,22 @@ export default {
     const allowlist = (env.ALLOWED_SCAN_TARGETS || "").split(",").map(v => v.trim().toLowerCase().replace(/\.$/, "")).filter(Boolean);
     if (!allowlist.length) return json({ detail: "Scan API is not configured. Set ALLOWED_SCAN_TARGETS in Worker settings." }, 503, corsOrigin);
     if (!allowlist.includes(target)) return json({ detail: "Target is not on the service owner's ALLOWED_SCAN_TARGETS allowlist." }, 403, corsOrigin);
+    const client = request.headers.get("CF-Connecting-IP") || "unknown";
+    if (url.pathname === "/inspect") {
+      if (!rateLimit(client)) return json({ detail: "Rate limit reached. Wait one minute before trying again." }, 429, corsOrigin);
+      try { await resolvePublicIPv4(target); return json(await inspectWebsite(target), 200, corsOrigin); }
+      catch (e) { return json({ detail: e.message || "Website inspection failed." }, 502, corsOrigin); }
+    }
     const ports = Array.isArray(body.ports) ? body.ports : [80, 443, 8080, 8443];
     if (!ports.length || ports.length > 8 || new Set(ports).size !== ports.length || ports.some(p => !Object.hasOwn(PORTS, p))) {
       return json({ detail: "Choose 1–8 unique ports from the supported list." }, 400, corsOrigin);
     }
-    const client = request.headers.get("CF-Connecting-IP") || "unknown";
     if (!rateLimit(client)) return json({ detail: "Rate limit reached. Wait one minute before trying again." }, 429, corsOrigin);
     let addresses;
     try { addresses = await resolvePublicIPv4(target); } catch (e) { return json({ detail: e.message || "Target resolution failed." }, 403, corsOrigin); }
     const jobs = addresses.flatMap(address => ports.map(port => ({ address, port })));
     if (jobs.length > 32) return json({ detail: "Scan exceeds the maximum number of checks." }, 400, corsOrigin);
-    const results = await Promise.all(jobs.map(job => probe(job.address, job.port)));
+    const results = await probeBounded(jobs);
     results.sort((a,b) => a.address.localeCompare(b.address) || a.port-b.port);
     return json({
       target, addresses, checked: results.length,
