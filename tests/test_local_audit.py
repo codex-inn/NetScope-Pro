@@ -67,7 +67,7 @@ def test_lan_scan_returns_all_addresses_status_and_progress():
             return FakeConnection()
         raise OSError("closed or filtered")
 
-    result = discover_lan("192.168.1.0/30", [80], True, connect=fake_connect)
+    result = discover_lan("192.168.1.0/30", [80], True, connect=fake_connect, arp_output="" )
     assert result["hosts_checked"] == 4
     assert result["checks_completed"] == 4
     assert result["hosts_found"] == 1
@@ -116,6 +116,6 @@ def test_discover_lan_supports_auto_target(monkeypatch):
     def fake_connect(address, timeout):
         if address == ("192.168.1.1", 80): return FakeConnection()
         raise OSError("closed")
-    result = audit.discover_lan("auto", [80], True, connect=fake_connect)
+    result = audit.discover_lan("auto", [80], True, connect=fake_connect, arp_output="" )
     assert result["target"] == "192.168.1.0/30"
     assert result["hosts_checked"] == 4
