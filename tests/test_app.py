@@ -191,6 +191,18 @@ def test_mega_scanner_returns_retryable_error_when_worker_slots_are_full(monkeyp
     finally:
         app.dependency_overrides.pop(current_user, None)
 
+def test_workspace_has_a_dedicated_local_wifi_scanner_tab():
+    index = Path(__file__).resolve().parents[1] / "index.html"
+    html = index.read_text(encoding="utf-8")
+    assert '<button data-section="wifi">' in html
+    assert 'id="section-wifi"' in html
+    assert 'fetch(\'/api/local-wifi-scan\'' in html
+    assert 'href="http://127.0.0.1:8765/workspace#section-wifi"' in html
+    assert "GitHub Pages cannot scan nearby Wi-Fi" in html
+    assert "id=\"wifi-export-json\"" in html
+    assert "id=\"wifi-export-csv\"" in html
+
+
 def test_static_scan_ui_uses_deployed_worker_as_default_api():
     index = Path(__file__).resolve().parents[1] / "index.html"
     html = index.read_text(encoding="utf-8")
