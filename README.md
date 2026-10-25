@@ -2,6 +2,20 @@
 
 NetScope Pro combines a browser-based URL/DNS workspace with an optional Cloudflare Worker for bounded HTTP inspection and TCP reachability checks, and an optional local Python API for certificate inspection. Browser history is stored in local storage; the project adds no database for the web assessment features.
 
+
+## GitHub Pages-only mode (no download)
+
+Open the published site at <https://codex-inn.github.io/NetScope-Pro/>. The static site runs in your browser and requires no installer. **DNS Inspector, Link Analyzer, browser-local asset/profile history, comparison, and JSON/CSV/PDF/print reports** can run without the Python app. DNS lookups use a public DNS-over-HTTPS resolver, so the resolver receives the queried domain names. Browser storage stays in the current browser profile and is not a cloud backup.
+
+For **Main Network Scan** and **Website Security Inspector** to perform remote checks, the optional Cloudflare Worker must be deployed and configured. The site has a default Worker URL, but that does not prove the Worker is live or configured. Use **Check API connection** first. A healthy API with zero configured targets is not ready to scan. The Worker owner must configure both:
+
+- `ALLOWED_SCAN_TARGETS`: comma-separated exact public hostnames you own or are explicitly authorized to test. Do not use wildcards or add third-party targets without permission.
+- `CORS_ORIGINS`: include the exact origin `https://codex-inn.github.io` (origin only; no repository path).
+
+Deploy the Worker from `cloudflare-worker` with Wrangler, then set its base URL in **Main Network Scan** if it differs from the default. A browser CORS error is not evidence that a scan ran. Fix the Worker URL, deployment, and CORS configuration, then retry. Worker checks are limited and are not a substitute for a full vulnerability assessment.
+
+**Not possible from GitHub Pages alone:** read the laptop's Wi-Fi adapter or nearby access points, scan the private LAN, read the Windows ARP cache, run Nmap locally, or retrieve full local TLS certificate-chain metadata. Those require the local Windows Python API. The UI must report these capabilities as unavailable in hosted mode rather than showing simulated success. No local executable or browser permission can grant a static website direct access to those OS-level interfaces.
+
 ## Features
 
 - URL structure analysis and public DNS-over-HTTPS queries for A, AAAA, MX, NS, TXT, and CAA.
