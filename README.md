@@ -1,80 +1,39 @@
-# NetScope Pro
+# 🛡️ NetScope-Pro
 
-NetScope Pro combines a browser-based URL/DNS workspace with an optional Cloudflare Worker for bounded HTTP inspection and TCP reachability checks, and an optional local Python API for certificate inspection. Browser history is stored in local storage; the project adds no database for the web assessment features.
+A browser-based network and website inspection toolkit with optional local Windows scanning.
 
+🌐 **Live website:** https://codex-inn.github.io/NetScope-Pro/
 
-## GitHub Pages-only mode (no download)
+## ✨ Features
 
-Open the published site at <https://codex-inn.github.io/NetScope-Pro/>. The static site runs in your browser and requires no installer. **DNS Inspector, Link Analyzer, browser-local asset/profile history, comparison, and JSON/CSV/PDF/print reports** can run without the Python app. DNS lookups use a public DNS-over-HTTPS resolver, so the resolver receives the queried domain names. Browser storage stays in the current browser profile and is not a cloud backup.
+- 🔎 URL and DNS inspection, including a DNSSEC authentication signal
+- 🧭 Website security checks for configured, authorized targets
+- 📡 Optional Windows Wi-Fi and private-LAN discovery
+- 📊 Findings, scan history, comparison, and JSON/CSV/PDF reports
+- ☁️ Optional Cloudflare Worker for bounded public HTTP/TCP checks
 
-For **Main Network Scan** and **Website Security Inspector** to perform remote checks, the optional Cloudflare Worker must be deployed and configured. The site has a default Worker URL, but that does not prove the Worker is live or configured. Use **Check API connection** first. A healthy API with zero configured targets is not ready to scan. The Worker owner must configure both:
+## 🚀 Getting Started
 
-- `ALLOWED_SCAN_TARGETS`: comma-separated exact public hostnames you own or are explicitly authorized to test. Do not use wildcards or add third-party targets without permission.
-- `CORS_ORIGINS`: include the exact origin `https://codex-inn.github.io` (origin only; no repository path).
+- **Browser-only:** Open the [live website](https://codex-inn.github.io/NetScope-Pro/). No installer is required for browser-based tools.
+- **Windows Wi-Fi/LAN scanner:** Requires the local Python API running on your Windows PC. Follow the [Local Scanner Quickstart](docs/LOCAL-SCANNER-QUICKSTART.md).
+- **Public website checks:** Require the optional Cloudflare Worker to be deployed and configured. A displayed Worker URL alone does not confirm it is operational.
 
-Deploy the Worker from `cloudflare-worker` with Wrangler, then set its base URL in **Main Network Scan** if it differs from the default. A browser CORS error is not evidence that a scan ran. Fix the Worker URL, deployment, and CORS configuration, then retry. Worker checks are limited and are not a substitute for a full vulnerability assessment.
+## 🔐 Safety & Limitations
 
-**Not possible from GitHub Pages alone:** read the laptop's Wi-Fi adapter or nearby access points, scan the private LAN, read the Windows ARP cache, run Nmap locally, or retrieve full local TLS certificate-chain metadata. Those require the local Windows Python API. The UI must report these capabilities as unavailable in hosted mode rather than showing simulated success. No local executable or browser permission can grant a static website direct access to those OS-level interfaces.
+- Scan only systems and networks you own or have explicit permission to test.
+- Configure exact authorized targets; do not use wildcard or unauthorized targets.
+- GitHub Pages alone cannot access your laptop's Wi-Fi adapter or scan your private LAN.
+- Keep the local API bound to `127.0.0.1`; do not expose it directly to the internet.
+- Findings are indicators for review, not proof of a confirmed vulnerability.
 
-## Features
+## 🧪 Tests
 
-- URL structure analysis and public DNS-over-HTTPS queries for A, AAAA, MX, NS, TXT, and CAA.
-- DNS mail and certificate-authority policy review for SPF, DMARC, CAA, and an optional supplied DKIM selector.
-- Website checks for HTTPS/TLS trust and certificate metadata, HTTP security headers, cookie flags, and same-host redirect chains in the local Python API. The Cloudflare Worker provides bounded header/redirect checks; its runtime does not expose peer-certificate chain details.
-- Evidence-based findings with severity, meaning, impact, and remediation; observations are not asserted to be confirmed vulnerabilities.
-- Local browser history, comparison/change detection, JSON/CSV/PDF exports, and print reports.
-- Optional exact-host authorized Worker TCP checks on a small supported port list.
-- Optional private LAN discovery through the loopback Python API, using bounded TCP connection checks.
+```bash
+pytest -q
+node --test cloudflare-worker/tests/*.test.mjs
+```
 
-## Run browser app
+Some tests use mocked network responses; passing tests do not replace real-world feature verification.
 
-Open `index.html` or serve the project directory using any static HTTP server. No build step is required. Use **DNS Inspector** and **Link Analyzer** for browser-only functions. Browser DNS queries go to Cloudflare DNS-over-HTTPS, which can see queried names.
-
-## Local API website assessment (full certificate metadata)
-
-The Python API performs the TLS socket handshake needed to observe the peer certificate. Use it only on hosts you own or have written authorization to assess.
-
-1. Use Python 3.11 or later; install project dependencies with `pip install -r requirements.txt`.
-2. Copy `.env.example` to `.env`, set unique local credentials/secrets, and set `AUTHORIZED_WEB_HOSTS` to exact authorized hostnames, comma-separated. Leave empty to disable website assessments. Do not include wildcard domains or targets you do not control.
-3. Start the local API using the project's documented app entry point (from the repository root): `uvicorn app.main:app --host 127.0.0.1 --port 8765`. Keep it bound to loopback.
-4. Open the local dashboard served by the API, navigate to **Website security assessment**, enter an exact configured host, and tick the explicit authorization confirmation. Optionally provide the active DKIM selector.
-
-The API rejects hosts outside the exact allowlist before DNS resolution; resolves and pins to a validated public address; rejects private/reserved addresses and unsupported ports; verifies HTTPS using the system trust store; follows only bounded same-host HTTP(S) redirects; does not forward credentials/cookies; uses five-second network timeouts, bounded response reads, concurrency limits, and per-client rate limits. DNS lookups use Cloudflare DNS-over-HTTPS. Review `app/mega_scanner.py` and `app/main.py` for exact current bounds.
-
-## Authorized private LAN discovery
-
-Start the local Python API and sign in. Open **Private LAN Discovery** in its dashboard, or open `/workspace` and use **Network Tools** with the authenticated local API. The local API serves `/workspace` same-origin so the browser can securely use your session. LAN discovery is available only through the loopback API (`127.0.0.1`); GitHub Pages cannot directly scan private networks. Enter `auto` to detect the current Windows private subnet (when it has 256 or fewer addresses), or enter a private IPv4 address/CIDR manually. Select supported TCP ports and confirm that you own the network or have explicit authorization. Only RFC1918 private IPv4 ranges are accepted, with at most 256 addresses and eight fixed ports per request. The API uses TCP connect checks with a 350 ms per-connection timeout, at most 32 concurrent connections, and a limit of two scans per minute. Results include each address, TCP response status, response latency when available, open selected ports, and MAC addresses from the Windows ARP table where available. ARP entries may be cached; a missing entry does not prove a device is offline. NetScope does not perform reverse DNS, OS fingerprinting, or vendor/model recognition. The dashboard provides JSON and CSV export. Non-responsive results do not prove a device is offline; filtered hosts may still exist. No UDP, OS fingerprinting, or service exploitation is performed. Use the existing Nmap feature only for networks explicitly listed in `APPROVED_CIDRS`.
-
-## Wi-Fi network scan (Windows laptop)
-
-The authenticated local dashboard and `/workspace` offer a one-click, Fing-inspired Wi-Fi and device scan. The web workspace has a dedicated **Wi-Fi Network Scan** tab. It reads your current Windows connection, nearby access points, and devices observed through bounded TCP checks plus the Windows ARP cache. NetScope shows only observed facts; it does not guess vendor, model, OS, or device names.
-
-The scan reads active Wi-Fi details through the local audit, lists visible access points using `netsh wlan show networks mode=bssid`, checks only selected TCP ports on the private subnet you enter (default `auto`), then reads the Windows ARP cache for in-range IPv4-to-MAC entries. You must explicitly confirm authorization. Device rows show IP address, MAC address when observed, whether TCP responded or an ARP entry was present, selected open ports, and latency where available. An ARP entry may be stale, while a device that does not answer selected ports or ARP may still be present. Hostnames and vendor/model recognition are not implemented.
-
-For the dedicated workspace tab, start the local API on Windows with the setup steps above, sign in, open `http://127.0.0.1:8765/workspace`, and choose **Wi-Fi Network Scan** in the left navigation. You can also use **Wi-Fi Network Scan** in the local dashboard at `http://127.0.0.1:8765/`. Keep the API bound to loopback. GitHub Pages alone cannot inspect local Wi-Fi; the local Python API on the Windows laptop is required. The local API requires sign-in and limits Wi-Fi and private LAN scans to two requests per minute each. The feature does not connect to access points or retrieve saved passwords.
-
-Signal is the percentage reported by Windows, not a calibrated dBm measurement. Frequency/band is derived only where channel numbering is unambiguous. Windows output depends on the adapter, driver, region, and language. No real Wi-Fi or LAN scan runs in unit tests or CI; mocked output is used for scanner parser tests.
-
-## Optional Cloudflare Worker
-
-The static GitHub Pages UI can use the optional Worker for its existing bounded TCP and HTTP checks. In `cloudflare-worker`, configure exact public hostnames in `ALLOWED_SCAN_TARGETS` and the Pages origin in `CORS_ORIGINS`, then deploy with Wrangler (`npx wrangler deploy`). Configure the site’s Worker base URL in **Main Network Scan**. The Worker does not expose certificate issuer, SAN, expiry, or chain metadata; use the local API for those fields. Worker deployment is independent from GitHub Pages.
-
-## Tests
-
-- Python: `pytest -q` (the web-check suite uses mocked DNS/socket responses; no third-party host is contacted).
-- Worker/PDF export: `node --test cloudflare-worker/tests/*.test.mjs` (uses mocked DNS and network operations).
-- Static JS: `node --check cloudflare-worker/src/index.js`; the `index.html` app is inline JavaScript and should be checked in a browser after edits.
-
-## Limits and safe interpretation
-
-No traceroute, packet capture, or broad port scan is performed. The local LAN discovery feature is limited to explicitly authorized private IPv4 targets and selected TCP ports as documented above. Header presence is not proof that a control is effective, and missing headers are not automatically vulnerabilities. A certificate result reflects the local runtime trust store and does not check revocation. Redirects to other hosts are recorded and not followed. DKIM is checked only for the selector supplied, if any. DNS absence may reflect provider behavior, delegation, caching, or lookup failure.
-
-Never scan a third-party target without explicit authorization. The consent checkbox supplements, but does not replace, the exact configured allowlist. Do not configure TNAU or any other third-party target without its explicit authorization.
-
-
-
-## Real DNSSEC signal and local network scanning
-
-- DNS Inspector requests Cloudflare DNS-over-HTTPS responses with the DNSSEC `do=1` flag and reports whether the resolver sets the authenticated-data (AD) flag. Missing AD is reported as **unconfirmed**, not as proof of tampering or a failed DNSSEC setup.
-- Network Tools links directly to the authenticated local dashboard for real Windows Wi-Fi access-point visibility and explicitly authorized private-LAN TCP discovery. The hosted Pages site cannot access local OS/network APIs and the local API intentionally rejects non-local origins; the shortcut opens the local dashboard instead of weakening that boundary.
-- Follow [the Windows local scanner quick start](docs/LOCAL-SCANNER-QUICKSTART.md) to configure and run the local Python service safely on loopback.
+---
+💡 Built for authorized network visibility and security learning.
