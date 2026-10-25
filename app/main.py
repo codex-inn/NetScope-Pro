@@ -823,8 +823,8 @@ input{background:#fffefa!important;color:#2d2a25!important;border-color:#ded4c8!
 input:focus{outline:3px solid #496b571c!important;border-color:#8da18e!important}
 button{background:#496b57!important;color:#fff!important;border-radius:9px!important}
 button:hover{background:#3d5b49!important}
-.muted{color:#746d63!important}.error{color:#a84d47!important}
-</style></head><body><main class="card"><div class="logo">⌁</div><h1>NetScope <span style="color:#61e6bd">Pro</span></h1><p class="muted">Network visibility for authorized administrators.</p><p class="error">__ERROR__</p><form method="post" action="/api/login"><label>Username</label><input name="username" autocomplete="username" required maxlength="40"><label>Password</label><input type="password" name="password" autocomplete="current-password" required><button type="submit">Sign in securely →</button></form><p class="muted small">Local dashboard · Scanning remains disabled until an approved CIDR is configured.</p></main></body></html>"""
+.muted{color:#746d63!important}.error{color:#a84d47!important}h1 span{color:#496b57!important}
+</style></head><body><main class="card"><div class="logo">📡</div><h1>NetScope <span style="color:#496b57">Pro</span></h1><p class="muted">Network visibility for authorized administrators.</p><p class="error">__ERROR__</p><form method="post" action="/api/login"><label>Username</label><input name="username" autocomplete="username" required maxlength="40"><label>Password</label><input type="password" name="password" autocomplete="current-password" required><button type="submit">Sign in securely →</button></form><p class="muted small">Local dashboard · Network scans require explicit authorization and configuration.</p></main></body></html>"""
 
 @app.get("/report-export.js")
 def report_export_script():
