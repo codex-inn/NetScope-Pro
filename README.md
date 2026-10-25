@@ -71,3 +71,10 @@ No traceroute, packet capture, or broad port scan is performed. The local LAN di
 
 Never scan a third-party target without explicit authorization. The consent checkbox supplements, but does not replace, the exact configured allowlist. Do not configure TNAU or any other third-party target without its explicit authorization.
 
+
+
+## Real DNSSEC signal and local network scanning
+
+- DNS Inspector requests Cloudflare DNS-over-HTTPS responses with the DNSSEC `do=1` flag and reports whether the resolver sets the authenticated-data (AD) flag. Missing AD is reported as **unconfirmed**, not as proof of tampering or a failed DNSSEC setup.
+- Network Tools links directly to the authenticated local dashboard for real Windows Wi-Fi access-point visibility and explicitly authorized private-LAN TCP discovery. The hosted Pages site cannot access local OS/network APIs and the local API intentionally rejects non-local origins; the shortcut opens the local dashboard instead of weakening that boundary.
+- Follow [the Windows local scanner quick start](docs/LOCAL-SCANNER-QUICKSTART.md) to configure and run the local Python service safely on loopback.
