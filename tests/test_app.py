@@ -196,11 +196,14 @@ def test_workspace_has_a_dedicated_local_wifi_scanner_tab():
     html = index.read_text(encoding="utf-8")
     assert '<button data-section="wifi">' in html
     assert 'id="section-wifi"' in html
-    assert 'fetch(\'/api/local-wifi-scan\'' in html
+    assert 'wifiApi(\'/api/local-wifi-scan\'' in html
     assert 'href="http://127.0.0.1:8765/workspace#section-wifi"' in html
-    assert "GitHub Pages cannot scan nearby Wi-Fi" in html
+    assert "GitHub Pages cannot inspect local Wi-Fi" in html
     assert "id=\"wifi-export-json\"" in html
     assert "id=\"wifi-export-csv\"" in html
+    assert 'wifiApi(\'/api/local-lan-scan\'' in html
+    assert 'id="wifi-target"' in html
+    assert 'mac_address' in html
 
 
 def test_static_scan_ui_uses_deployed_worker_as_default_api():

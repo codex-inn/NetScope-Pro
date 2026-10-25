@@ -62,10 +62,42 @@ def detect_local_private_cidr() -> str:
     candidates.sort(reverse=True)
     return candidates[0][1]
 
-def discover_lan(target: str, ports: list[int], authorized: bool, *, connect=socket.create_connection) -> dict:
-    """Bounded TCP connect discovery; reports only hosts that accept selected ports."""
-    if isinstance(target, str) and target.strip().lower() == "auto":
-        target = detect_local_private_cidr()
+def parse_arp_neighbors(output: str, target: str) -> dict[str, dict[str, str]]:
+    """Parse Windows ARP output and keep only IPv4 neighbors inside the authorized subnet."""
+    network = ipaddress.ip_network(target, strict=False)
+    neighbors: dict[str, dict[str, str]] = {}
+    pattern = re.compile(
+        r"^\s*(\d{1,3}(?:\.\d{1,3}){3})\s+"
+        r"([0-9a-f]{2}(?:[-:][0-9a-f]{2}){5})\s+(dynamic|static)\s*$",
+        re.IGNORECASE,
+    )
+    for line in output.splitlines():
+        match = pattern.match(line)
+        if not match:
+            continue
+        try:
+            address = ipaddress.ip_address(match.group(1))
+        except ValueError:
+            continue
+        if address.version != 4 or address not in network:
+            continue
+        mac = match.group(2).replace("-", ":").lower()
+        neighbors[str(address)] = {
+            "mac_address": mac,
+            "neighbor_type": match.group(3).casefold(),
+        }
+    return neighbors
+
+
+def discover_lan(
+    target: str,
+    ports: list[int],
+    authorized: bool,
+    *,
+    connect=socket.create_connection,
+    arp_output: str | None = None,
+) -> dict:
+    """Bounded TCP discovery and best-effort Windows ARP inventory for a private subnet."""
     if isinstance(target, str) and target.strip().lower() == "auto":
         target = detect_local_private_cidr()
     network, selected_ports = validate_lan_scope(target, ports, authorized)
@@ -89,29 +121,49 @@ def discover_lan(target: str, ports: list[int], authorized: bool, *, connect=soc
             if result:
                 ip, port_result = result
                 open_by_host.setdefault(ip, []).append(port_result)
-    # Include every address in the bounded target range so the UI can distinguish
-    # responding hosts from addresses that did not answer the selected TCP ports.
+    if arp_output is None and platform.system() == "Windows":
+        arp_output = _run_readonly(["arp", "-a"])
+    arp_neighbors = parse_arp_neighbors(arp_output or "", str(network))
     hosts = []
     for address in network:
         ip = str(address)
         found = sorted(open_by_host.get(ip, []), key=lambda item: item["port"])
+        neighbor = arp_neighbors.get(ip, {})
+        if found:
+            state = "responding"
+        elif neighbor:
+            state = "arp_cached"
+        else:
+            state = "no_response"
         hosts.append({
             "ip": ip,
             "hostname": None,
-            "status": "responding" if found else "no_response",
+            "mac_address": neighbor.get("mac_address"),
+            "neighbor_type": neighbor.get("neighbor_type"),
+            "status": state,
             "response_time_ms": min((item["latency_ms"] for item in found), default=None),
             "open_ports": found,
         })
+    discovered = sum(1 for host in hosts if host["status"] != "no_response")
     return {
-        "target": str(network), "ports": selected_ports, "hosts_checked": network.num_addresses,
-        "checks_completed": len(tasks), "hosts_found": len(open_by_host), "hosts": hosts,
+        "target": str(network),
+        "ports": selected_ports,
+        "hosts_checked": network.num_addresses,
+        "checks_completed": len(tasks),
+        "hosts_found": discovered,
+        "tcp_responding_hosts": len(open_by_host),
+        "arp_neighbors_found": len(arp_neighbors),
+        "hosts": hosts,
         "progress": {"completed": len(tasks), "total": len(tasks), "percent": 100},
         "duration_seconds": round(time.monotonic() - started, 2),
         "checked_at": datetime.now(timezone.utc).isoformat(timespec="seconds"),
-        "method": "TCP connect only",
-        "limitations": ["A host is marked responding only if it accepts a selected TCP connection; filtered hosts may still exist.",
-                        "Hostname reverse lookup is not performed; hostname is null when not resolved.",
-                        "No service exploitation, UDP probing, or OS fingerprinting is performed."],
+        "method": "TCP connect checks plus Windows ARP neighbor table when available",
+        "limitations": [
+            "TCP status means one selected port accepted a connection; a host may still exist without answering selected ports.",
+            "ARP entries are best-effort local cache data and may be stale; absence does not prove a device is offline.",
+            "Hostname lookup and vendor/model recognition are not implemented; those fields are not guessed.",
+            "No service exploitation, UDP probing, or OS fingerprinting is performed.",
+        ],
     }
 
 
