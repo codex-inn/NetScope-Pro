@@ -5,7 +5,7 @@ def test_hosted_dns_inspector_requests_dnssec_validation_signal():
     html = (Path(__file__).resolve().parents[1] / "index.html").read_text(encoding="utf-8")
     assert "async function dnsQuery(name,type,dnssec=false)" in html
     assert "(dnssec?'&do=1':'')" in html
-    assert 'dnssec.authenticated=d.AD===true' in html
+    assert 'dnssec={authenticated:d.AD===true' in html
     assert 'title:"DNSSEC validation not confirmed"' in html
     assert 'dnssec,spf,dmarc,dkim,findings' in html
 
